@@ -1,0 +1,9 @@
+# EF Core scaffolds this folder. Treat everything here as generated code:
+# it is never hand-edited, so analyzer rules do not apply to it.
+root = false
+
+[*.cs]
+generated_code = true
+dotnet_analyzer_diagnostic.severity = none
+dotnet_diagnostic.CA1861.severity = none
+dotnet_diagnostic.CS0618.severity = none

@@ -1,0 +1,13 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/ServiceManagement.Api/ServiceManagement.Api.csproj" />
+    <Project Path="src/ServiceManagement.Application/ServiceManagement.Application.csproj" />
+    <Project Path="src/ServiceManagement.Domain/ServiceManagement.Domain.csproj" />
+    <Project Path="src/ServiceManagement.Infrastructure/ServiceManagement.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/ServiceManagement.ApiTests/ServiceManagement.ApiTests.csproj" />
+    <Project Path="tests/ServiceManagement.IntegrationTests/ServiceManagement.IntegrationTests.csproj" />
+    <Project Path="tests/ServiceManagement.UnitTests/ServiceManagement.UnitTests.csproj" />
+  </Folder>
+</Solution>

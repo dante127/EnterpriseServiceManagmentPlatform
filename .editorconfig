@@ -1,0 +1,56 @@
+# Editor configuration for the Service Management Platform.
+# The goal is a consistent style without relying on anyone's personal IDE settings.
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 4
+
+[*.{cs,csx}]
+indent_size = 4
+max_line_length = 120
+
+[*.{json,yml,yaml,md,mdx,xml,props,csproj,slnx,sln}]
+indent_size = 2
+
+[*.md]
+trim_trailing_whitespace = false
+
+# Scaffolded EF Core migrations are generated code: they are not hand-edited and
+# should not be linted like source.
+[**/Persistence/Migrations/*.cs]
+generated_code = true
+dotnet_analyzer_diagnostic.severity = none
+
+[*.{cs,csx}]
+# Core style rules mirrored from the .NET defaults so reviewers see the same
+# expectations in GitHub and in the IDE.
+csharp_style_expression_bodied_methods = when_on_single_line:suggestion
+csharp_style_expression_bodied_properties = true:suggestion
+csharp_style_expression_bodied_constructors = false:suggestion
+csharp_style_var_for_built_in_types = false:suggestion
+csharp_style_var_when_type_is_apparent = true:suggestion
+csharp_style_var_elsewhere = false:suggestion
+csharp_prefer_braces = true:suggestion
+csharp_style_namespace_declarations = file_scoped:warning
+csharp_style_throw_expression = true:suggestion
+csharp_style_prefer_null_check_over_is_null = true:suggestion
+
+# Naming: private fields are camelCase with an underscore prefix.
+dotnet_naming_rule.private_fields_underscore.severity = suggestion
+dotnet_naming_rule.private_fields_underscore.symbols = private_fields
+dotnet_naming_rule.private_fields_underscore.style = underscore_camel
+dotnet_naming_symbols.private_fields.applicable_kinds = field
+dotnet_naming_symbols.private_fields.applicable_accessibilities = private
+dotnet_naming_symbols.private_fields.required_modifiers = readonly
+dotnet_naming_style.underscore_camel.required_prefix = _
+dotnet_naming_style.underscore_camel.capitalization = camel_case
+
+# Prefer modern C# language features the codebase already relies on.
+dotnet_diagnostic.IDE0090.severity = suggestion
+dotnet_diagnostic.IDE0300.severity = suggestion
+dotnet_diagnostic.IDE0305.severity = suggestion

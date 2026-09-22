@@ -1,0 +1,13 @@
+<Project>
+
+  <!-- Test projects inherit the repository-wide build settings... -->
+  <Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)../'))" />
+
+  <PropertyGroup>
+    <!-- ...and additionally allow descriptive BDD-style test names, and helpers
+         such as fixture properties that do not touch instance state. -->
+    <NoWarn>$(NoWarn);CA1707;CA1822</NoWarn>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+</Project>

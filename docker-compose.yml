@@ -1,0 +1,86 @@
+# Local development stack: API + SQL Server + Redis.
+#
+#   cp .env.example .env      # then adjust the values if you want
+#   docker compose up -d
+#   open http://localhost:8080/swagger
+#
+# Deliberately, this file contains no credentials: both services read their
+# values from the git-ignored `.env` file.
+
+services:
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: esmp-sqlserver
+    env_file:
+      - .env
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_PID: Developer
+    ports:
+      - "${MSSQL_PORT:-1433}:1433"
+    volumes:
+      - sqlserver-data:/var/opt/mssql
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P \"$$MSSQL_SA_PASSWORD\" -C -Q 'SELECT 1' || exit 1"
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    networks:
+      - esmp
+
+  redis:
+    image: redis:7-alpine
+    container_name: esmp-redis
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    networks:
+      - esmp
+
+  api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    container_name: esmp-api
+    depends_on:
+      sqlserver:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ASPNETCORE_URLS: http://+:8080
+      ConnectionStrings__Default: "Server=sqlserver,1433;Database=ServiceManagement;User Id=sa;Pwd=${MSSQL_SA_PASSWORD};TrustServerCertificate=True;Encrypt=False"
+      Redis__Configuration: "redis:6379:abortConnect=false"
+      Redis__Enabled: "true"
+      Jwt__Issuer: ServiceManagement.Api
+      Jwt__Audience: ServiceManagement.Clients
+      Database__ApplyMigrationsOnStartup: "true"
+      BackgroundJobs__Enabled: "true"
+    ports:
+      - "${API_PORT:-8080}:8080"
+    restart: unless-stopped
+    networks:
+      - esmp
+
+volumes:
+  sqlserver-data:
+  redis-data:
+
+networks:
+  esmp:
+    driver: bridge

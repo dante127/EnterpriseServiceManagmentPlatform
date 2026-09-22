@@ -1,0 +1,20 @@
+# Files the Docker build context must not include.
+**/bin/
+**/obj/
+**/.vs/
+**/.vscode/
+**/.idea/
+**/.git/
+**/.gitignore
+**/TestResults/
+**/logs/
+**/*.user
+**/docker-compose*.yml
+**/Dockerfile
+**/.env
+**/.env.*
+!**/.env.example
+**/docs/
+**/*.md
+!README.md
+**/.config/dotnet-tools.json

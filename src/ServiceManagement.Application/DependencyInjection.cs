@@ -1,6 +1,5 @@
 using System.Reflection;
 using FluentValidation;
-using Mapster;
 using MediatR;
 using Microsoft.Extensions.DependencyInjection;
 using ServiceManagement.Application.Common.Behaviors;
@@ -26,8 +25,9 @@ public static class DependencyInjection
 
         services.AddValidatorsFromAssembly(assembly, includeInternalTypes: true);
 
-        TypeAdapterConfig.GlobalSettings.Scan(assembly);
-        services.AddMapster();
+        // Shared SLA resolution: create and update must agree on the targets a
+        // ticket gets, including the fallback when no policy is configured.
+        services.AddScoped<Tickets.SlaPolicyResolver>();
 
         return services;
     }

@@ -5,10 +5,16 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Application-internal collaborators (SlaPolicyResolver, TicketQueries) are
+         unit tested directly, so the test assembly needs to see internals. -->
+    <InternalsVisibleTo Include="ServiceManagement.UnitTests" />
+    <InternalsVisibleTo Include="ServiceManagement.IntegrationTests" />
+    <InternalsVisibleTo Include="ServiceManagement.ApiTests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="FluentValidation" Version="12.1.1" />
     <PackageReference Include="FluentValidation.DependencyInjectionExtensions" Version="12.1.1" />
-    <PackageReference Include="Mapster" Version="10.0.12" />
-    <PackageReference Include="Mapster.DependencyInjection" Version="10.0.12" />
     <PackageReference Include="MediatR" Version="14.2.0" />
     <PackageReference Include="Microsoft.EntityFrameworkCore" Version="10.0.12" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.12" />

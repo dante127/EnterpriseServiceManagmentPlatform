@@ -73,23 +73,8 @@ public class TicketPersistenceTests
         await act.Should().ThrowAsync<DbUpdateConcurrencyException>();
     }
 
-    [SkippableFact]
-    public async Task The_ticket_number_sequence_hands_out_increasing_values()
-    {
-        Skip.IfNot(_fixture.IsAvailable, _fixture.UnavailableReason);
-
-        await using var context = _fixture.CreateContext();
-
-        var first = await context.Database
-            .SqlQueryRaw<long>("SELECT NEXT VALUE FOR dbo.TicketNumbers AS [Value]")
-            .SingleAsync();
-
-        var second = await context.Database
-            .SqlQueryRaw<long>("SELECT NEXT VALUE FOR dbo.TicketNumbers AS [Value]")
-            .SingleAsync();
-
-        second.Should().BeGreaterThan(first);
-    }
+    // The sequence contract is covered end-to-end by TicketNumberGeneratorTests,
+    // which exercises the real generator rather than re-implementing the SQL here.
 
     [SkippableFact]
     public async Task Soft_deleted_tickets_disappear_from_queries_but_stay_in_the_table()
@@ -200,6 +185,7 @@ public class TicketPersistenceTests
             ticket.SetIdempotencyKey(idempotencyKey);
             ticket.ApplySlaPolicy(30, 240, 20);
             ticket.AssignToUser(agentId, requesterId, "Integration test assignment", reportedAt.AddMinutes(1));
+            ticket.AddComment("First agent update.", agentId, isInternal: false, reportedAt.AddMinutes(2));
 
             context.Tickets.Add(ticket);
             await context.SaveChangesAsync();

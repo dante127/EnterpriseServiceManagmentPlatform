@@ -48,7 +48,13 @@ public class TicketLifecycleApiTests : IClassFixture<DatabaseFixture>
         client.DefaultRequestHeaders.Authorization = new("Bearer", token);
 
         // 1. Catalog lookup (cache-aside read).
-        var catalog = await client.GetStringAsync("/api/v1/catalog/services");
+        var catalogResponse = await client.GetAsync("/api/v1/catalog/services");
+        catalogResponse.StatusCode.Should().Be(
+            HttpStatusCode.OK,
+            "catalog read should be permitted; body was: {0}",
+            await catalogResponse.Content.ReadAsStringAsync());
+
+        var catalog = await catalogResponse.Content.ReadAsStringAsync();
         var serviceId = JsonNode.Parse(catalog)!["data"]!.AsArray()[0]!["id"]!.GetValue<Guid>();
 
         var categories = await client.GetStringAsync("/api/v1/catalog/categories");
@@ -89,7 +95,9 @@ public class TicketLifecycleApiTests : IClassFixture<DatabaseFixture>
             reason = "First line owns hardware incidents."
         });
 
-        assign.IsSuccessStatusCode.Should().BeTrue();
+        assign.IsSuccessStatusCode.Should().BeTrue(
+            "assignment should be permitted for a manager; body was: {0}",
+            await assign.Content.ReadAsStringAsync());
 
         // 5. Progress the workflow.
         var rowVersion = JsonNode.Parse(await (await client.GetAsync($"/api/v1/tickets/{ticketId}")).Content.ReadAsStringAsync())!
@@ -120,7 +128,11 @@ public class TicketLifecycleApiTests : IClassFixture<DatabaseFixture>
         // 7. The requester receives a notification about the flow.
         client.DefaultRequestHeaders.Authorization = new("Bearer", await LoginAsRequesterAsync(factory, client));
         var notifications = await client.GetStringAsync("/api/v1/notifications");
-        JsonNode.Parse(notifications)!["data"]!.AsArray().Should().NotBeEmpty();
+
+        // The list endpoint is paged: data holds { items, totalCount, ... }.
+        var notificationPage = JsonNode.Parse(notifications)!["data"]!;
+        notificationPage["items"]!.AsArray().Should().NotBeEmpty();
+        notificationPage["totalCount"]!.GetValue<int>().Should().BeGreaterThan(0);
 
         factory.Dispose();
     }

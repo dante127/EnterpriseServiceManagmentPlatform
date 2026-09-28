@@ -1,5 +1,4 @@
 using FluentValidation;
-using Mapster;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
 using ServiceManagement.Application.Common.Exceptions;
@@ -49,14 +48,27 @@ public sealed class GetNotificationsQueryHandler
 
         var totalCount = await query.CountAsync(cancellationToken);
 
-        var entities = await query
+        // Projected in the database rather than materialised and adapted in memory,
+        // like every other query in the codebase. The enum is converted to its name
+        // here, so the client receives "SlaBreached" and the selected columns are
+        // exactly the ones the DTO declares - a client never sees a field it did
+        // not ask for, and the SQL stays visible when this query is tuned.
+        var items = await query
             .OrderByDescending(notification => notification.CreatedAt)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
+            .Select(notification => new NotificationDto(
+                notification.Id,
+                notification.UserId,
+                notification.Type.ToString(),
+                notification.Title,
+                notification.Message,
+                notification.EntityName,
+                notification.EntityId,
+                notification.IsRead,
+                notification.ReadAt,
+                notification.CreatedAt))
             .ToListAsync(cancellationToken);
-
-        // Mapster keeps the DTO shape decoupled from the entity.
-        var items = entities.Select(notification => notification.Adapt<NotificationDto>()).ToList();
 
         return new PagedResult<NotificationDto>(items, page, pageSize, totalCount);
     }
@@ -132,20 +144,15 @@ public sealed class MarkAllNotificationsReadCommandHandler
         var userId = _currentUser.RequireUserId();
         var now = _clock.UtcNow;
 
-        var unread = await _dbContext.Notifications
+        // Set-based update: the whole unread inbox is marked in one statement, so a
+        // user with thousands of notifications never materialises them in memory.
+        // The rows are not loaded, so the change tracker stays clean.
+        return await _dbContext.Notifications
             .Where(notification => notification.UserId == userId && !notification.IsRead)
-            .ToListAsync(cancellationToken);
-
-        foreach (var notification in unread)
-        {
-            notification.MarkAsRead(now);
-        }
-
-        if (unread.Count > 0)
-        {
-            await _dbContext.SaveChangesAsync(cancellationToken);
-        }
-
-        return unread.Count;
+            .ExecuteUpdateAsync(
+                setters => setters
+                    .SetProperty(notification => notification.IsRead, true)
+                    .SetProperty(notification => notification.ReadAt, now),
+                cancellationToken);
     }
 }

@@ -32,9 +32,22 @@ public class ApiSmokeTests : IClassFixture<ApiFactory>
     }
 
     [Fact]
-    public async Task Swagger_exposes_the_versioned_document()
+    public async Task Swagger_is_not_exposed_outside_development()
     {
+        // The API surface must not be published in a deployed environment: it hands
+        // an attacker the full route list and the endpoint documentation.
         using var client = _factory.CreateClient();
+
+        var response = await client.GetAsync("/swagger/v1/swagger.json");
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
+    public async Task Swagger_exposes_the_versioned_document_in_development()
+    {
+        using var factory = new ApiFactory { UseDevelopmentEnvironment = true };
+        using var client = factory.CreateClient();
 
         var response = await client.GetAsync("/swagger/v1/swagger.json");
 

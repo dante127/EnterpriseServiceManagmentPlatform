@@ -25,9 +25,15 @@ public sealed class ApiFactory : WebApplicationFactory<Program>
     public string JwtSigningKey { get; set; } =
         "api-test-signing-key-that-is-long-enough-1234567890";
 
+    /// <summary>
+    /// Switches the host to the Development environment. Only the tests that
+    /// assert environment-gated behaviour (such as Swagger) need this.
+    /// </summary>
+    public bool UseDevelopmentEnvironment { get; set; }
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
-        builder.UseEnvironment("Testing");
+        builder.UseEnvironment(UseDevelopmentEnvironment ? "Development" : "Testing");
 
         builder.ConfigureAppConfiguration((_, configuration) =>
         {

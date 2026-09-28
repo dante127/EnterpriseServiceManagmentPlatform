@@ -75,8 +75,6 @@ public class Ticket : SoftDeletableEntity
 
     public DateTimeOffset? ClosedAt { get; private set; }
 
-    public DateTimeOffset? DueAt => ResolutionDueAt;
-
     public SlaStatus SlaStatus { get; private set; }
 
     /// <summary>SQL Server rowversion: drives optimistic concurrency (HTTP 409 on conflict).</summary>
@@ -110,7 +108,14 @@ public class Ticket : SoftDeletableEntity
         Title = Guard.NotBlank(title, nameof(title), 300);
         Description = Guard.NotBlank(description, nameof(description), 8000);
         CategoryId = Guard.NotEmpty(categoryId, nameof(categoryId));
-        ChangePriority(priorityId);
+
+        // Only a genuine priority change invalidates the SLA deadlines. Calling
+        // ChangePriority unconditionally wiped them on every ordinary edit, which
+        // made the ticket permanently invisible to the SLA monitor.
+        if (priorityId != PriorityId)
+        {
+            ChangePriority(priorityId);
+        }
     }
 
     public void ChangePriority(Guid priorityId)
@@ -158,7 +163,16 @@ public class Ticket : SoftDeletableEntity
     public void SetIdempotencyKey(string? idempotencyKey)
         => IdempotencyKey = string.IsNullOrWhiteSpace(idempotencyKey) ? null : idempotencyKey.Trim();
 
-    public void AssignToUser(Guid assigneeId, Guid changedBy, string? reason, DateTimeOffset at)
+    /// <summary>
+    /// Assigns a user and returns the new trail entry so the caller can persist it.
+    /// <para>
+    /// The entry is returned rather than exposed as a property on purpose: a
+    /// navigable <c>TicketAssignmentHistory</c> member makes EF infer a second,
+    /// shadow-keyed relationship back to <c>Ticket</c>, which silently changes the
+    /// mapped model.
+    /// </para>
+    /// </summary>
+    public TicketAssignmentHistory AssignToUser(Guid assigneeId, Guid changedBy, string? reason, DateTimeOffset at)
     {
         Guard.NotEmpty(assigneeId, nameof(assigneeId));
         EnsureNotTerminal();
@@ -167,15 +181,18 @@ public class Ticket : SoftDeletableEntity
         var previousTeam = AssignedTeamId;
 
         AssignedToId = assigneeId;
-        RecordAssignment(previousAssignee, assigneeId, previousTeam, AssignedTeamId, reason, changedBy, at);
+        var entry = RecordAssignment(previousAssignee, assigneeId, previousTeam, AssignedTeamId, reason, changedBy, at);
 
         if (Status == TicketStatus.New)
         {
             ChangeStatus(TicketStatus.Assigned, changedBy, at);
         }
+
+        return entry;
     }
 
-    public void AssignToTeam(Guid teamId, Guid changedBy, string? reason, DateTimeOffset at)
+    /// <summary>Assigns a team and returns the new trail entry so the caller can persist it.</summary>
+    public TicketAssignmentHistory AssignToTeam(Guid teamId, Guid changedBy, string? reason, DateTimeOffset at)
     {
         Guard.NotEmpty(teamId, nameof(teamId));
         EnsureNotTerminal();
@@ -184,12 +201,14 @@ public class Ticket : SoftDeletableEntity
         var previousTeam = AssignedTeamId;
 
         AssignedTeamId = teamId;
-        RecordAssignment(previousAssignee, AssignedToId, previousTeam, teamId, reason, changedBy, at);
+        var entry = RecordAssignment(previousAssignee, AssignedToId, previousTeam, teamId, reason, changedBy, at);
 
         if (Status == TicketStatus.New)
         {
             ChangeStatus(TicketStatus.Assigned, changedBy, at);
         }
+
+        return entry;
     }
 
     public void ChangeStatus(TicketStatus next, Guid changedBy, DateTimeOffset at)
@@ -241,7 +260,7 @@ public class Ticket : SoftDeletableEntity
         return comment;
     }
 
-    private void RecordAssignment(
+    private TicketAssignmentHistory RecordAssignment(
         Guid? previousAssignee,
         Guid? newAssignee,
         Guid? previousTeam,
@@ -250,7 +269,7 @@ public class Ticket : SoftDeletableEntity
         Guid changedBy,
         DateTimeOffset at)
     {
-        _assignmentHistory.Add(new TicketAssignmentHistory(
+        var entry = new TicketAssignmentHistory(
             Id,
             previousAssignee,
             newAssignee,
@@ -258,7 +277,11 @@ public class Ticket : SoftDeletableEntity
             newTeam,
             reason,
             changedBy,
-            at));
+            at);
+
+        _assignmentHistory.Add(entry);
+
+        return entry;
     }
 
     private void EnsureNotTerminal()

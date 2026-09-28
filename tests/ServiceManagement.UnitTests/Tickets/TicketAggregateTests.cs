@@ -91,6 +91,39 @@ public class TicketAggregateTests
     }
 
     [Fact]
+    public void Updating_details_with_the_same_priority_keeps_the_sla_deadlines()
+    {
+        // Regression guard: UpdateDetails used to call ChangePriority unconditionally,
+        // which nulled both deadlines on every edit and left the ticket permanently
+        // invisible to the SLA monitor.
+        var ticket = TicketFactory.CreateWithSla(firstResponseMinutes: 30, resolutionMinutes: 240);
+        var expectedFirstResponse = ticket.FirstResponseDueAt;
+        var expectedResolution = ticket.ResolutionDueAt;
+
+        ticket.UpdateDetails(
+            "Laptop will not boot after update",
+            "Still a black screen.",
+            Guid.CreateVersion7(),
+            ticket.PriorityId);
+
+        ticket.FirstResponseDueAt.Should().Be(expectedFirstResponse);
+        ticket.ResolutionDueAt.Should().Be(expectedResolution);
+    }
+
+    [Fact]
+    public void Updating_details_with_a_different_priority_clears_the_stale_deadlines()
+    {
+        var ticket = TicketFactory.CreateWithSla();
+        var newPriority = Guid.CreateVersion7();
+
+        ticket.UpdateDetails("Escalated", "Escalating this incident.", Guid.CreateVersion7(), newPriority);
+
+        ticket.PriorityId.Should().Be(newPriority);
+        ticket.FirstResponseDueAt.Should().BeNull();
+        ticket.ResolutionDueAt.Should().BeNull();
+    }
+
+    [Fact]
     public void Refresh_sla_status_promotes_a_late_first_response_to_breached()
     {
         var ticket = TicketFactory.CreateWithSla(firstResponseMinutes: 30, resolutionMinutes: 240);

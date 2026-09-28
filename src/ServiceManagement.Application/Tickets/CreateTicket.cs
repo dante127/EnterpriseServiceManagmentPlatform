@@ -1,11 +1,10 @@
 using FluentValidation;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Options;
 using ServiceManagement.Application.Common.Auditing;
 using ServiceManagement.Application.Common.Exceptions;
 using ServiceManagement.Application.Common.Interfaces;
-using ServiceManagement.Application.Common.Options;
+using ServiceManagement.Application.Common.Persistence;
 using ServiceManagement.Domain.Auditing;
 using ServiceManagement.Domain.Notifications;
 using ServiceManagement.Domain.Organizations;
@@ -53,7 +52,7 @@ public sealed class CreateTicketCommandHandler : IRequestHandler<CreateTicketCom
     private readonly IAuditService _auditService;
     private readonly ICurrentUserService _currentUser;
     private readonly IDateTimeProvider _clock;
-    private readonly SlaOptions _slaOptions;
+    private readonly SlaPolicyResolver _slaPolicyResolver;
 
     public CreateTicketCommandHandler(
         IApplicationDbContext dbContext,
@@ -62,7 +61,7 @@ public sealed class CreateTicketCommandHandler : IRequestHandler<CreateTicketCom
         IAuditService auditService,
         ICurrentUserService currentUser,
         IDateTimeProvider clock,
-        IOptions<SlaOptions> slaOptions)
+        SlaPolicyResolver slaPolicyResolver)
     {
         _dbContext = dbContext;
         _ticketNumberGenerator = ticketNumberGenerator;
@@ -70,10 +69,15 @@ public sealed class CreateTicketCommandHandler : IRequestHandler<CreateTicketCom
         _auditService = auditService;
         _currentUser = currentUser;
         _clock = clock;
-        _slaOptions = slaOptions.Value;
+        _slaPolicyResolver = slaPolicyResolver;
     }
 
-    public async Task<TicketDetailDto> Handle(CreateTicketCommand request, CancellationToken cancellationToken)
+    public Task<TicketDetailDto> Handle(CreateTicketCommand request, CancellationToken cancellationToken)
+        => _dbContext.ExecuteAsync(
+            async token => await CreateAsync(request, token),
+            cancellationToken);
+
+    private async Task<TicketDetailDto> CreateAsync(CreateTicketCommand request, CancellationToken cancellationToken)
     {
         // Idempotent replay: the same key never produces a second ticket.
         if (!string.IsNullOrWhiteSpace(request.IdempotencyKey))
@@ -162,10 +166,13 @@ public sealed class CreateTicketCommandHandler : IRequestHandler<CreateTicketCom
             ticket.AssignToTeam(request.AssignedTeamId.Value, requesterId, "Auto-assigned on creation", now);
         }
 
-        await ApplySlaPolicyAsync(ticket, service, priorityId.Value, cancellationToken);
+        await _slaPolicyResolver.ApplyToAsync(
+            ticket,
+            priorityId.Value,
+            preferredPolicyId: service.DefaultSlaPolicyId,
+            cancellationToken);
 
         _dbContext.Tickets.Add(ticket);
-        await _dbContext.SaveChangesAsync(cancellationToken);
 
         if (ticket.AssignedTeamId is not null)
         {
@@ -175,6 +182,8 @@ public sealed class CreateTicketCommandHandler : IRequestHandler<CreateTicketCom
                 .Select(member => member.UserId)
                 .ToListAsync(cancellationToken);
 
+            // Staged onto this unit of work, so the notification cannot outlive a
+            // ticket that was never created.
             await _notificationService.NotifyManyAsync(
                 memberIds.Select(memberId => new NotificationMessage(
                     memberId,
@@ -188,14 +197,12 @@ public sealed class CreateTicketCommandHandler : IRequestHandler<CreateTicketCom
         }
 
         await _auditService.RecordAsync(
-            new AuditEntry(
+            TicketAuditEntry.For(
                 AuditActions.TicketCreated,
                 nameof(Ticket),
                 ticket.Id.ToString(),
-                _currentUser.UserId,
-                _currentUser.IpAddress,
-                _currentUser.CorrelationId,
-                NewValues: AuditJson.Serialize(new
+                _currentUser,
+                newValues: AuditJson.Serialize(new
                 {
                     ticket.TicketNumber,
                     ticket.Title,
@@ -206,46 +213,9 @@ public sealed class CreateTicketCommandHandler : IRequestHandler<CreateTicketCom
                 })),
             cancellationToken);
 
+        await _dbContext.SaveChangesAsync(cancellationToken);
+
         return await LoadDetailAsync(ticket.Id, cancellationToken);
-    }
-
-    private async Task ApplySlaPolicyAsync(
-        Ticket ticket,
-        Service service,
-        Guid priorityId,
-        CancellationToken cancellationToken)
-    {
-        SlaPolicy? policy = null;
-
-        if (service.DefaultSlaPolicyId is not null)
-        {
-            policy = await _dbContext.SlaPolicies
-                .AsNoTracking()
-                .FirstOrDefaultAsync(
-                    candidate => candidate.Id == service.DefaultSlaPolicyId && candidate.IsActive,
-                    cancellationToken);
-        }
-
-        policy ??= await _dbContext.SlaPolicies
-            .AsNoTracking()
-            .FirstOrDefaultAsync(
-                candidate => candidate.PriorityId == priorityId && candidate.IsActive,
-                cancellationToken);
-
-        if (policy is not null)
-        {
-            ticket.ApplySlaPolicy(
-                policy.FirstResponseMinutes,
-                policy.ResolutionMinutes,
-                policy.AtRiskThresholdPercent);
-            return;
-        }
-
-        // No policy configured: documented fallback targets keep the ticket measurable.
-        ticket.ApplySlaPolicy(
-            _slaOptions.FallbackFirstResponseMinutes,
-            _slaOptions.FallbackResolutionMinutes,
-            _slaOptions.AtRiskThresholdPercent);
     }
 
     private Task<TicketDetailDto> LoadDetailAsync(Guid ticketId, CancellationToken cancellationToken)

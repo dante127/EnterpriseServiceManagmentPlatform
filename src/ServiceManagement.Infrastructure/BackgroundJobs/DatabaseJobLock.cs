@@ -54,7 +54,32 @@ internal static class DatabaseJobLock
             return;
         }
 
-        await ExecuteLockCommandAsync(connection, "sp_releaseapplock", resource, cancellationToken);
+        // sp_releaseapplock accepts only @LockOwner and @Resource. Passing the
+        // acquisition parameters (@LockMode, @LockTimeout) makes SQL Server reject
+        // the call with "too many arguments specified", which surfaced as a failed
+        // cycle on every tick even though the work itself had succeeded.
+        await using var command = connection.CreateCommand();
+        command.CommandText = "sp_releaseapplock";
+        command.CommandType = CommandType.StoredProcedure;
+
+        command.Parameters.Add(CreateParameter(command, "@Resource", resource));
+        command.Parameters.Add(CreateParameter(command, "@LockOwner", "Session"));
+
+        var returnValue = command.CreateParameter();
+        returnValue.ParameterName = "@result";
+        returnValue.DbType = DbType.Int32;
+        returnValue.Direction = ParameterDirection.ReturnValue;
+        command.Parameters.Add(returnValue);
+
+        try
+        {
+            await command.ExecuteNonQueryAsync(cancellationToken);
+        }
+        catch (DbException)
+        {
+            // Releasing a lock the session no longer holds is not worth failing the
+            // cycle over: the session is about to end, which releases it anyway.
+        }
     }
 
     private static async Task<int> ExecuteLockCommandAsync(

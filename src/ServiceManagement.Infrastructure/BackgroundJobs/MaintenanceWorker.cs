@@ -18,8 +18,6 @@ public sealed class MaintenanceWorker : BackgroundService
 {
     internal const string JobName = "maintenance";
 
-    private const int RetainedDaysAfterExpiry = 7;
-
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly BackgroundJobOptions _options;
     private readonly ILogger<MaintenanceWorker> _logger;
@@ -83,41 +81,24 @@ public sealed class MaintenanceWorker : BackgroundService
     private async Task RunAsync(CancellationToken cancellationToken)
     {
         await using var scope = _scopeFactory.CreateAsyncScope();
-        var services = scope.ServiceProvider;
 
-        var dbContext = services.GetRequiredService<ApplicationDbContext>();
-        var clock = services.GetRequiredService<IDateTimeProvider>();
-        var notificationsOptions = services.GetRequiredService<IOptions<NotificationsOptions>>().Value;
+        // The lock is taken on the raw context, before the cycle resolves its own
+        // dependencies: it must cover the whole pass, and a second replica that
+        // cannot take the lock should do no work at all.
+        var dbContext = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
 
         var lockTaken = await DatabaseJobLock.TryAcquireAsync(dbContext, JobName, cancellationToken);
 
         if (!lockTaken)
         {
-            _logger.LogInformation("Another instance already holds the maintenance lock; skipping this tick.");
+            _logger.LogDebug("Another instance already holds the maintenance lock; skipping this tick.");
             return;
         }
 
         try
         {
-            var now = clock.UtcNow;
-            var tokenCutoff = now.AddDays(-RetainedDaysAfterExpiry);
-
-            var removedTokens = await dbContext.RefreshTokens
-                .Where(token =>
-                    token.ExpiresAt < tokenCutoff
-                    || (token.RevokedAt != null && token.RevokedAt < tokenCutoff))
-                .ExecuteDeleteAsync(cancellationToken);
-
-            var notificationCutoff = now.AddDays(-Math.Max(1, notificationsOptions.ReadNotificationRetentionDays));
-
-            var removedNotifications = await dbContext.Notifications
-                .Where(notification => notification.IsRead && notification.CreatedAt < notificationCutoff)
-                .ExecuteDeleteAsync(cancellationToken);
-
-            _logger.LogInformation(
-                "Maintenance removed {RemovedTokens} expired refresh token(s) and {RemovedNotifications} old notification(s).",
-                removedTokens,
-                removedNotifications);
+            var cycle = scope.ServiceProvider.GetRequiredService<MaintenanceCycle>();
+            await cycle.RunAsync(cancellationToken);
         }
         finally
         {

@@ -6,6 +6,7 @@ using ServiceManagement.Application.Common.Auditing;
 using ServiceManagement.Application.Common.Caching;
 using ServiceManagement.Application.Common.Exceptions;
 using ServiceManagement.Application.Common.Interfaces;
+using ServiceManagement.Application.Common.Persistence;
 using ServiceManagement.Domain.Auditing;
 using ServiceManagement.Domain.Identity;
 
@@ -73,7 +74,12 @@ public sealed class CreateUserCommandHandler : IRequestHandler<CreateUserCommand
         _clock = clock;
     }
 
-    public async Task<UserDto> Handle(CreateUserCommand request, CancellationToken cancellationToken)
+    public Task<UserDto> Handle(CreateUserCommand request, CancellationToken cancellationToken)
+        => _dbContext.ExecuteAsync(
+            async token => await CreateAsync(request, token),
+            cancellationToken);
+
+    private async Task<UserDto> CreateAsync(CreateUserCommand request, CancellationToken cancellationToken)
     {
         var email = request.Email.Trim().ToLowerInvariant();
 
@@ -127,11 +133,11 @@ public sealed class CreateUserCommandHandler : IRequestHandler<CreateUserCommand
         }
 
         _dbContext.Users.Add(user);
-        await _dbContext.SaveChangesAsync(cancellationToken);
 
         await _cache.RemoveAsync(CacheKeys.UserPermissions(user.Id), cancellationToken);
         await _cache.RemoveAsync(CacheKeys.UserRoles(user.Id), cancellationToken);
 
+        // Staged, not yet written: the audit record joins the same unit of work.
         await _auditService.RecordAsync(
             new AuditEntry(
                 AuditActions.UserCreated,
@@ -142,6 +148,8 @@ public sealed class CreateUserCommandHandler : IRequestHandler<CreateUserCommand
                 _currentUser.CorrelationId,
                 NewValues: AuditJson.Serialize(new { user.Email, user.UserName, Roles = roles.Select(r => r.Name) })),
             cancellationToken);
+
+        await _dbContext.SaveChangesAsync(cancellationToken);
 
         return new UserDto(
             user.Id,

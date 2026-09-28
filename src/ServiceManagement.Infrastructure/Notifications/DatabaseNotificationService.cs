@@ -5,10 +5,16 @@ using ServiceManagement.Domain.Notifications;
 namespace ServiceManagement.Infrastructure.Notifications;
 
 /// <summary>
-/// Primary notification channel: writes a durable per-user notification row that
+/// Primary notification channel: stages a durable per-user notification row that
 /// the client polls. Delivery is decoupled from the producing module, so adding
 /// push or SMS later means adding another implementation behind the same
 /// abstraction - not touching ticket code.
+/// <para>
+/// Rows are staged on the caller's context rather than saved here, so a
+/// notification commits together with the change that caused it. Saving
+/// independently would let a notification outlive a change that was later rolled
+/// back.
+/// </para>
 /// </summary>
 public sealed class DatabaseNotificationService : INotificationService
 {
@@ -26,7 +32,7 @@ public sealed class DatabaseNotificationService : INotificationService
     public Task NotifyAsync(NotificationMessage message, CancellationToken cancellationToken = default)
         => NotifyManyAsync([message], cancellationToken);
 
-    public async Task NotifyManyAsync(
+    public Task NotifyManyAsync(
         IEnumerable<NotificationMessage> messages,
         CancellationToken cancellationToken = default)
     {
@@ -34,8 +40,10 @@ public sealed class DatabaseNotificationService : INotificationService
 
         if (batch.Count == 0)
         {
-            return;
+            return Task.CompletedTask;
         }
+
+        cancellationToken.ThrowIfCancellationRequested();
 
         foreach (var message in batch)
         {
@@ -49,11 +57,11 @@ public sealed class DatabaseNotificationService : INotificationService
                 message.CorrelationId));
         }
 
-        await _dbContext.SaveChangesAsync(cancellationToken);
-
         _logger.LogInformation(
-            "Stored {NotificationCount} notification(s) of type(s) {NotificationTypes}.",
+            "Queued {NotificationCount} notification(s) of type(s) {NotificationTypes} for the current unit of work.",
             batch.Count,
             string.Join(",", batch.Select(message => message.Type).Distinct()));
+
+        return Task.CompletedTask;
     }
 }

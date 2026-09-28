@@ -149,36 +149,71 @@ public sealed class GetTicketHistoryQueryHandler : IRequestHandler<GetTicketHist
                 comment.UpdatedAt))
             .ToListAsync(cancellationToken);
 
-        var assignments = await _dbContext.TicketAssignmentHistories
+        // Two statements, not one per name. The trail rows are read first, then the
+        // distinct user ids they mention are resolved in a single lookup. Inlining
+        // the three name lookups into the projection made EF emit a correlated
+        // Users subquery per name per row, so a page of history cost 3N lookups.
+        var trail = await _dbContext.TicketAssignmentHistories
             .AsNoTracking()
             .Where(history => history.TicketId == request.TicketId)
             .OrderByDescending(history => history.ChangedAt)
-            .Select(history => new TicketAssignmentHistoryDto(
+            .Select(history => new
+            {
                 history.Id,
                 history.PreviousAssigneeId,
-                history.PreviousAssigneeId == null
-                    ? null
-                    : _dbContext.Users
-                        .Where(user => user.Id == history.PreviousAssigneeId)
-                        .Select(user => user.FirstName + " " + user.LastName)
-                        .FirstOrDefault(),
                 history.NewAssigneeId,
-                history.NewAssigneeId == null
-                    ? null
-                    : _dbContext.Users
-                        .Where(user => user.Id == history.NewAssigneeId)
-                        .Select(user => user.FirstName + " " + user.LastName)
-                        .FirstOrDefault(),
                 history.PreviousTeamId,
                 history.NewTeamId,
                 history.Reason,
                 history.ChangedBy,
-                _dbContext.Users
-                    .Where(user => user.Id == history.ChangedBy)
-                    .Select(user => user.FirstName + " " + user.LastName)
-                    .FirstOrDefault()!,
-                history.ChangedAt))
+                history.ChangedAt
+            })
             .ToListAsync(cancellationToken);
+
+        if (trail.Count == 0)
+        {
+            return new TicketHistoryDto(request.TicketId, comments, []);
+        }
+
+        // Nulls and duplicates collapse here, so a 200-row trail that mentions ten
+        // people costs one query over ten ids rather than 200.
+        var userIds = trail
+            .SelectMany(entry => new[]
+            {
+                entry.PreviousAssigneeId,
+                entry.NewAssigneeId,
+                (Guid?)entry.ChangedBy
+            })
+            .Where(id => id is not null && id.Value != Guid.Empty)
+            .Select(id => id!.Value)
+            .Distinct()
+            .ToList();
+
+        var namesByUserId = await _dbContext.Users
+            .AsNoTracking()
+            .Where(user => userIds.Contains(user.Id))
+            .Select(user => new { user.Id, Name = user.FirstName + " " + user.LastName })
+            .ToDictionaryAsync(entry => entry.Id, entry => entry.Name, cancellationToken);
+
+        string? NameOf(Guid? userId)
+            => userId is not null && namesByUserId.TryGetValue(userId.Value, out var name) ? name : null;
+
+        var assignments = trail
+            .Select(entry => new TicketAssignmentHistoryDto(
+                entry.Id,
+                entry.PreviousAssigneeId,
+                NameOf(entry.PreviousAssigneeId),
+                entry.NewAssigneeId,
+                NameOf(entry.NewAssigneeId),
+                entry.PreviousTeamId,
+                entry.NewTeamId,
+                entry.Reason,
+                entry.ChangedBy,
+                // The acting user is required, so a name that somehow failed to
+                // resolve falls back to the id rather than rendering as blank.
+                NameOf(entry.ChangedBy) ?? entry.ChangedBy.ToString(),
+                entry.ChangedAt))
+            .ToList();
 
         return new TicketHistoryDto(request.TicketId, comments, assignments);
     }

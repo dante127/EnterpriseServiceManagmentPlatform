@@ -8,6 +8,13 @@ namespace ServiceManagement.Infrastructure.Auditing;
 /// <summary>
 /// Persists audit records. Payloads are passed through a redactor first so a
 /// secret can never end up in the audit trail even if a caller is careless.
+/// <para>
+/// The record is <em>staged</em> on the caller's context, not saved here. A
+/// ticket change, its notifications and its audit record must share one
+/// transaction: if this service committed on its own, a later failure would leave
+/// the business change applied with no audit trail, which in an audit-grade
+/// system is worse than the change not happening at all.
+/// </para>
 /// </summary>
 public sealed class AuditService : IAuditService
 {
@@ -35,9 +42,14 @@ public sealed class AuditService : IAuditService
         _clock = clock;
     }
 
-    public async Task RecordAsync(AuditEntry entry, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Stages the record. The caller's next <c>SaveChangesAsync</c> commits it.
+    /// </summary>
+    public Task RecordAsync(AuditEntry entry, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(entry);
+
+        cancellationToken.ThrowIfCancellationRequested();
 
         _dbContext.AuditLogs.Add(new AuditLog(
             entry.UserId ?? _currentUser.UserId,
@@ -50,7 +62,7 @@ public sealed class AuditService : IAuditService
             Redact(entry.OldValues),
             Redact(entry.NewValues)));
 
-        await _dbContext.SaveChangesAsync(cancellationToken);
+        return Task.CompletedTask;
     }
 
     /// <summary>Replaces the value of any JSON property whose name looks sensitive.</summary>

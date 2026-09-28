@@ -1,20 +1,31 @@
 <Project>
 
-  <!-- Deliberate analyzer suppressions, explained in docs/FINAL_REVIEW.md:
-       CS1591 missing XML docs on internals; CA1848/CA1873 LoggerMessage source generation for ad-hoc logging;
-       CA1305 culture-specific formatting in log messages; CA1000 static factories on ApiResponse<T>;
-       CA1859 micro-optimisation hints; CA1711/CA1716 domain naming (Permission, Service, Group);
-       CA2255 module initializer used on purpose to keep validation field names consistent
-       between the API, the workers and the tests. -->
+  <!-- Warnings are errors. The codebase builds clean under this today, and the
+       CI build already passes -warnaserror, so this only makes the guarantee hold
+       for a developer's own machine and for any build that forgets the flag.
+
+       Analyzer suppressions, each with the reason it exists (see
+       docs/FINAL_REVIEW.md for the full review):
+         CS1591  missing XML docs on internals
+         CA1848 / CA1873  LoggerMessage source generation for ad-hoc logging
+         CA1305  culture-specific formatting in log messages
+         CA1000  static factories on ApiResponse<T>
+         CA1859  micro-optimisation hints
+         CA1711 / CA1716  domain naming (Permission, Service, Group)
+         CA2255  module initializer, used on purpose to keep validation field names
+                 consistent between the API, the workers and the tests.
+
+       CA1812 was on this list and has been removed: nothing in the solution
+       triggered it, so it was suppressing nothing. -->
   <PropertyGroup>
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <EnableNETAnalyzers>true</EnableNETAnalyzers>
     <AnalysisMode>Recommended</AnalysisMode>
-    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
-    <NoWarn>$(NoWarn);CS1591;CA1848;CA1873;CA1305;CA1000;CA1859;CA1711;CA1716;CA1812;CA2255</NoWarn>
+    <NoWarn>$(NoWarn);CS1591;CA1848;CA1873;CA1305;CA1000;CA1859;CA1711;CA1716;CA2255</NoWarn>
     <Deterministic>true</Deterministic>
   </PropertyGroup>
 

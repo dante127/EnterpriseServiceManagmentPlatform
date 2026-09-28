@@ -11,6 +11,13 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Composition-root internals (option binding and validation) are unit tested
+         directly, so the test assembly needs to see internals. -->
+    <InternalsVisibleTo Include="ServiceManagement.UnitTests" />
+    <InternalsVisibleTo Include="ServiceManagement.IntegrationTests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\ServiceManagement.Application\ServiceManagement.Application.csproj" />
   </ItemGroup>
 
@@ -23,4 +30,3 @@
   </ItemGroup>
 
 </Project>
-

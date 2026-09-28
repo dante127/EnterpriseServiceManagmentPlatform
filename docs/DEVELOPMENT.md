@@ -117,24 +117,75 @@ dotnet ef database drop --force \
 ## 6. Running the tests
 
 ```bash
-dotnet test                                   # full suite; container tests skip
-ESMP_RUN_INTEGRATION_TESTS=1 dotnet test      # also spins up a SQL Server container
+dotnet test                                   # full suite; persistence tests use LocalDB when present
 ```
 
-| Project | Purpose | Needs a container |
+| Project | Purpose | Needs a database |
 | --- | --- | --- |
-| `ServiceManagement.UnitTests` | Domain, validation, mapping, EF model configuration | no |
-| `ServiceManagement.IntegrationTests` | Persistence, concurrency, sequences, soft delete, idempotency | yes (opt-in) |
-| `ServiceManagement.ApiTests` | Host boot, Swagger, auth, correlation id, full HTTP lifecycle | smoke: no · lifecycle: opt-in |
+| `ServiceManagement.UnitTests` | Domain, validation, mapping, configuration files | no |
+| `ServiceManagement.IntegrationTests` | Persistence, concurrency, sequences, soft delete, idempotency | yes (auto-detected) |
+| `ServiceManagement.ApiTests` | Host boot, Swagger gating, auth, correlation id, full HTTP lifecycle | smoke: no · lifecycle: yes |
 
-The container-backed fixture starts `mcr.microsoft.com/mssql/server:2022-latest`, applies migrations and
-seeds. If Docker is unavailable the tests report as **skipped**, not failed.
+The persistence fixture looks for a database in this order and silently skips only if none is reachable:
 
-Run a single test project:
+1. `ESMP_TEST_SQL_CONNECTION` - an explicit connection string, which is what CI sets;
+2. SQL Server LocalDB, instance `MSSQLLocalDB` - started automatically if it is installed but stopped;
+3. Testcontainers, if a Docker daemon is reachable.
+
+Set `ESMP_TEST_SKIP_LOCALDB=1` to bypass step 2. Run a single test project:
 
 ```bash
 dotnet test tests/ServiceManagement.UnitTests/ServiceManagement.UnitTests.csproj
 ```
+
+## 6a. Continuous integration
+
+`.github/workflows/ci.yml` runs on every push and pull request to `main`:
+
+- **build** - `dotnet build --configuration Release -warnaserror`, so a new warning fails the run;
+- **unit, integration and API tests** - against a SQL Server service container;
+- **docker** - builds the image with buildx caching, then smoke tests the published
+  artifact: it asserts Swagger is 404, runs the image's own `--health-check`, and
+  confirms startup rejects the placeholder signing key.
+
+Local reproduction of the gate:
+
+```bash
+export Jwt__Issuer=ServiceManagement.Api.Ci
+export Jwt__Audience=ServiceManagement.Clients.Ci
+export Jwt__SigningKey=ci-only-signing-key-that-is-long-enough-1234567890
+dotnet build ServiceManagement.slnx -c Release -warnaserror
+```
+
+## 6b. Deployment
+
+The image is built from `docker/Dockerfile` and expects these at runtime:
+
+| Setting | Requirement |
+| --- | --- |
+| `Jwt__SigningKey` | **Required.** At least 32 characters and not the placeholder from `appsettings.json`; startup fails otherwise. Generate with `openssl rand -base64 48`. |
+| `ConnectionStrings__Default` | **Required.** |
+| `ASPNETCORE_ENVIRONMENT` | `Production` in a deployed environment; anything else publishes Swagger. |
+| `Proxy__Enabled` | Set to `true` behind a reverse proxy, together with `Proxy__KnownProxies`. Without it, rate limiting and audit records see the proxy address. |
+| `Cors__AllowedOrigins__0..n` | Explicit browser origins. An empty list allows none. |
+
+Run the single-host compose stack in production mode:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+```
+
+Health probes exposed by the API: `/health/live` (process is up), `/health/ready`
+(SQL Server and Redis reachable), and `/health` (everything). The image's
+`HEALTHCHECK` calls the application itself:
+
+```bash
+dotnet ServiceManagement.Api.dll --health-check [--health-probe /health/ready]
+```
+
+It exits non-zero when the API is not serving, which is what lets an orchestrator
+restart a broken replica. The runtime image ships no `curl` or `wget`, which is why
+the probe lives in the application rather than in the Dockerfile.
 
 ## 7. Project conventions
 

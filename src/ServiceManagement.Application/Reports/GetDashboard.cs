@@ -27,7 +27,7 @@ public sealed record DashboardDto(
 /// Dashboard aggregate. Results are cached (they are read constantly and can
 /// tolerate a few seconds of staleness) and every figure is computed in SQL.
 /// </summary>
-public sealed record GetDashboardQuery(string? RefreshKey = null) : IRequest<DashboardDto>;
+public sealed record GetDashboardQuery : IRequest<DashboardDto>;
 
 public sealed class GetDashboardQueryHandler : IRequestHandler<GetDashboardQuery, DashboardDto>
 {
@@ -37,23 +37,22 @@ public sealed class GetDashboardQueryHandler : IRequestHandler<GetDashboardQuery
     private readonly IApplicationDbContext _dbContext;
     private readonly ICacheService _cache;
     private readonly IDateTimeProvider _clock;
-    private readonly RedisOptions _redisOptions;
 
     public GetDashboardQueryHandler(
         IApplicationDbContext dbContext,
         ICacheService cache,
-        IDateTimeProvider clock,
-        IOptions<RedisOptions> redisOptions)
+        IDateTimeProvider clock)
     {
         _dbContext = dbContext;
         _cache = cache;
         _clock = clock;
-        _redisOptions = redisOptions.Value;
     }
 
     public Task<DashboardDto> Handle(GetDashboardQuery request, CancellationToken cancellationToken)
+        // The TTL is a cache policy, not part of the key: embedding it produced a
+        // distinct key per configuration change and silently stranded old entries.
         => _cache.GetOrCreateAsync(
-            $"{CacheKeys.Dashboard}:{_redisOptions.DefaultTtlMinutes}",
+            CacheKeys.Dashboard,
             BuildDashboardAsync,
             DashboardCacheTtl,
             cancellationToken);

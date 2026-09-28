@@ -1,0 +1,164 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# A new push to the same branch cancels the previous run: no wasted CI minutes.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_NUGET_SIGNATURE_VERIFICATION: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+  DOTNET_NOLOGO: true
+
+jobs:
+  build-and-test:
+    name: Build and test
+    runs-on: ubuntu-latest
+
+    services:
+      sqlserver:
+        image: mcr.microsoft.com/mssql/server:2022-latest
+        env:
+          ACCEPT_EULA: "Y"
+          MSSQL_PID: Developer
+          # Satisfies the SQL Server password policy. CI-only, never a real secret.
+          MSSQL_SA_PASSWORD: "CiOnly!Passw0rd123"
+        ports:
+          - 1433:1433
+        options: >-
+          --health-cmd="/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P CiOnly!Passw0rd123 -C -Q 'SELECT 1'"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=12
+          --health-start-period=30s
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Restore
+        run: dotnet restore ServiceManagement.slnx
+
+      # The composition root refuses to start while Jwt:SigningKey is still the
+      # placeholder, so every server-based test supplies its own. Unit tests
+      # exercise the validator directly and need nothing.
+      - name: Build
+        env:
+          Jwt__Issuer: ServiceManagement.Api.Ci
+          Jwt__Audience: ServiceManagement.Clients.Ci
+          Jwt__SigningKey: ci-only-signing-key-that-is-long-enough-1234567890
+        run: dotnet build ServiceManagement.slnx --configuration Release --no-restore -warnaserror
+
+      - name: Unit tests
+        env:
+          Jwt__Issuer: ServiceManagement.Api.Ci
+          Jwt__Audience: ServiceManagement.Clients.Ci
+          Jwt__SigningKey: ci-only-signing-key-that-is-long-enough-1234567890
+        run: >
+          dotnet test tests/ServiceManagement.UnitTests/ServiceManagement.UnitTests.csproj
+          --configuration Release --no-build --logger "trx;LogFileName=unit.trx"
+
+      # The integration suite needs a real SQL Server: rowversion concurrency,
+      # the filtered unique index and the ticket-number sequence cannot be faked.
+      # ESMP_TEST_SQL_CONNECTION makes the fixture use the service above.
+      - name: Integration and API tests
+        env:
+          ESMP_TEST_SQL_CONNECTION: "Server=localhost,1433;Database=ServiceManagementCi;User Id=sa;Pwd=CiOnly!Passw0rd123;TrustServerCertificate=True;Connect Timeout=30"
+          ESMP_TEST_SKIP_LOCALDB: "1"
+        run: >
+          dotnet test tests/ServiceManagement.IntegrationTests/ServiceManagement.IntegrationTests.csproj
+          --configuration Release --no-build --logger "trx;LogFileName=integration.trx"
+          &&
+          dotnet test tests/ServiceManagement.ApiTests/ServiceManagement.ApiTests.csproj
+          --configuration Release --no-build --logger "trx;LogFileName=api.trx"
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: "**/TestResults/*.trx"
+          if-no-files-found: ignore
+
+  docker:
+    name: Docker image
+    runs-on: ubuntu-latest
+    needs: build-and-test
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      # Buildx is what makes the cache mount below effective.
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          push: false
+          load: true
+          tags: esmp-api:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # The image runs as the published artifact, not as a project reference, so
+      # this catches anything that only works when launched from bin/Debug.
+      - name: Smoke test the published image
+        run: |
+          docker run -d --name esmp-smoke \
+            -e ASPNETCORE_ENVIRONMENT=Production \
+            -e ASPNETCORE_URLS=http://+:8080 \
+            -e Database__ApplyMigrationsOnStartup=false \
+            -e BackgroundJobs__Enabled=false \
+            -e Redis__Enabled=false \
+            -e Jwt__SigningKey="ci-only-signing-key-that-is-long-enough-1234567890" \
+            -e "ConnectionStrings__Default=Server=127.0.0.1,1433;Database=Smoke;User Id=sa;Pwd=x;TrustServerCertificate=True" \
+            -p 8080:8080 esmp-api:ci
+
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://localhost:8080/health/live > /dev/null 2>&1; then
+              echo "API healthy after ${attempt}s"
+              break
+            fi
+            sleep 1
+          done
+
+          # Swagger must not be published outside development.
+          status=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/swagger/v1/swagger.json)
+          if [ "$status" != "404" ]; then
+            echo "Swagger is exposed in Production (HTTP $status)"
+            docker logs esmp-smoke
+            exit 1
+          fi
+
+          # The image's own health probe must agree.
+          docker exec esmp-smoke dotnet ServiceManagement.Api.dll --health-check
+
+          # The placeholder key must be rejected.
+          if docker run --rm \
+              -e Jwt__Issuer=x -e Jwt__Audience=y \
+              esmp-api:ci 2>&1 | grep -q "placeholder"; then
+            echo "Startup correctly rejects the placeholder signing key"
+          else
+            echo "Startup accepted the placeholder signing key"
+            exit 1
+          fi
+
+          docker rm -f esmp-smoke

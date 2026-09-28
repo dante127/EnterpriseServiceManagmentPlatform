@@ -40,7 +40,10 @@ USER $APP_UID
 
 EXPOSE 8080
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
-    CMD ["dotnet", "--info"]
+# Probes the API itself rather than the runtime. `dotnet --info` only proves the
+# host process can start, so a replica that fails every request would still be
+# reported healthy.
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD ["dotnet", "ServiceManagement.Api.dll", "--health-check"]
 
 ENTRYPOINT ["dotnet", "ServiceManagement.Api.dll"]

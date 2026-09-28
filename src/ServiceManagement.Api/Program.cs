@@ -1,7 +1,16 @@
 using Serilog;
 using Serilog.Events;
+using ServiceManagement.Api;
 using ServiceManagement.Api.Extensions;
 using ServiceManagement.Infrastructure;
+
+// The container image ships no curl or wget, so the health probe is served by
+// the application itself: the orchestrator runs the same binary with
+// `--health-check` and the process exits non-zero when the API is not serving.
+if (args.Contains("--health-check"))
+{
+    return await HealthCheckCommand.RunAsync(args);
+}
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -36,6 +45,8 @@ app.Logger.LogInformation(
     app.Environment.EnvironmentName);
 
 await app.RunAsync();
+
+return 0;
 
 /// <summary>Exposed so integration/API tests can boot the real host.</summary>
 public partial class Program

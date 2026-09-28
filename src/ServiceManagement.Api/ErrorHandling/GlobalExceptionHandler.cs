@@ -12,6 +12,26 @@ namespace ServiceManagement.Api.ErrorHandling;
 /// Central translation of exceptions into the API response contract.
 /// Internal details (stack traces, SQL text, connection strings) are logged but
 /// never returned to the caller.
+/// <para>
+/// The two exception hierarchies in the solution answer different questions, and
+/// this is where the boundary is drawn:
+/// <list type="bullet">
+/// <item>
+/// <b>Domain rules</b> (<c>DomainException</c> and subclasses) come from an
+/// aggregate refusing an illegal state, such as moving a closed ticket back to
+/// in progress. They know nothing about HTTP or who is calling. A rule violation
+/// is a bad request (400); an illegal transition is a conflict (409).
+/// </item>
+/// <item>
+/// <b>Orchestration</b> (<c>Application/Common/Exceptions</c>) come from a handler
+/// when the request cannot be served: the entity is missing, a unique code is
+/// taken, the caller lacks permission, or their token expired.
+/// </item>
+/// </list>
+/// To decide where a new exception belongs: if the sentence is "this aggregate
+/// will not allow that", it is a domain exception. If it is "this request cannot
+/// be served as asked", it is an application one.
+/// </para>
 /// </summary>
 public sealed class GlobalExceptionHandler : IExceptionHandler
 {

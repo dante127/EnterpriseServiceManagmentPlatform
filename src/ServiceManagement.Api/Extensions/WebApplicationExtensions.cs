@@ -7,6 +7,7 @@ using ServiceManagement.Api.Extensions;
 using ServiceManagement.Api.Middleware;
 using ServiceManagement.Application.Common.Interfaces;
 using ServiceManagement.Application.Common.Options;
+using ServiceManagement.Infrastructure.Diagnostics;
 using ServiceManagement.Infrastructure.Persistence;
 using ServiceManagement.Infrastructure.Persistence.Seed;
 
@@ -19,6 +20,10 @@ public static class WebApplicationExtensions
     {
         ArgumentNullException.ThrowIfNull(app);
 
+        // Forwarded headers must run first: every later component (rate limiting,
+        // the audit trail, Serilog) reads the client address from the connection.
+        app.UseForwardedHeaders();
+
         // Correlation id first so every later component (and the audit trail) can use it.
         app.UseMiddleware<CorrelationIdMiddleware>();
 
@@ -26,12 +31,17 @@ public static class WebApplicationExtensions
 
         app.UseSerilogRequestLogging();
 
-        app.UseSwagger();
-        app.UseSwaggerUI(options =>
+        // The API surface is only published locally. Exposing it everywhere hands
+        // an attacker the full route list and the endpoint documentation.
+        if (app.Environment.IsDevelopment())
         {
-            options.SwaggerEndpoint("/swagger/v1/swagger.json", "Service Management API v1");
-            options.DocumentTitle = "Service Management Platform API";
-        });
+            app.UseSwagger();
+            app.UseSwaggerUI(options =>
+            {
+                options.SwaggerEndpoint("/swagger/v1/swagger.json", "Service Management API v1");
+                options.DocumentTitle = "Service Management Platform API";
+            });
+        }
 
         app.UseCors(ServiceCollectionExtensions.CorsPolicyName);
         app.UseRateLimiter();
@@ -42,19 +52,11 @@ public static class WebApplicationExtensions
         app.MapControllers();
 
         // Unmatched routes answer with the same envelope as everything else.
-        app.MapFallback(context =>
-        {
-            context.Response.StatusCode = StatusCodes.Status404NotFound;
-            context.Response.ContentType = "application/json";
-
-            return context.Response.WriteAsJsonAsync(new
-            {
-                success = false,
-                data = (object?)null,
-                message = $"No endpoint matches {context.Request.Method} {context.Request.Path}.",
-                errors = Array.Empty<object>()
-            });
-        });
+        app.MapFallback(context => ApiResponseWriter.WriteFailureAsync(
+            context,
+            StatusCodes.Status404NotFound,
+            $"No endpoint matches {context.Request.Method} {context.Request.Path}.",
+            context.RequestAborted));
 
         app.MapHealthChecks("/health", new HealthCheckOptions
         {

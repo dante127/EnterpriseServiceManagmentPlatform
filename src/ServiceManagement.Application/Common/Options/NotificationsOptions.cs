@@ -1,3 +1,5 @@
+using System.ComponentModel.DataAnnotations;
+
 namespace ServiceManagement.Application.Common.Options;
 
 /// <summary>Strongly typed notification configuration.</summary>
@@ -12,5 +14,6 @@ public sealed class NotificationsOptions
     public bool EmailEnabled { get; set; }
 
     /// <summary>Retention window for read notifications before they are purged.</summary>
+    [Range(1, 3650)]
     public int ReadNotificationRetentionDays { get; set; } = 30;
 }

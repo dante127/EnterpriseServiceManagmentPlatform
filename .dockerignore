@@ -14,6 +14,7 @@
 **/.env
 **/.env.*
 !**/.env.example
+# Deployment overlays live beside the stack definitions and are not build inputs.
 **/docs/
 **/*.md
 !README.md

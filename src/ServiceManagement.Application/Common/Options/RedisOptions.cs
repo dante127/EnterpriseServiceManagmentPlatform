@@ -1,3 +1,5 @@
+using System.ComponentModel.DataAnnotations;
+
 namespace ServiceManagement.Application.Common.Options;
 
 /// <summary>Strongly typed cache configuration.</summary>
@@ -11,5 +13,6 @@ public sealed class RedisOptions
     /// <summary>When false the API runs without a distributed cache (read-through fallback).</summary>
     public bool Enabled { get; set; } = true;
 
+    [Range(1, 10080)]
     public int DefaultTtlMinutes { get; set; } = 10;
 }

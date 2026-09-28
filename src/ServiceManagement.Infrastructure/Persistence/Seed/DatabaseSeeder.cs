@@ -229,8 +229,18 @@ public static class DatabaseSeeder
             .FirstAsync(candidate => candidate.OrganizationId == organization.Id, cancellationToken);
 
         team.SetManager(manager.Id);
-        team.AddMember(manager.Id, isManager: true);
-        team.AddMember(agent.Id);
+
+        // The team is already tracked, and ids are generated client-side, so EF
+        // cannot recognise these rows as new. Without an explicit Add they are
+        // sent as UPDATEs that match nothing and the save fails with a spurious
+        // concurrency error.
+        var members = new List<TeamMember>
+        {
+            team.AddMember(manager.Id, isManager: true),
+            team.AddMember(agent.Id)
+        };
+
+        context.TeamMembers.AddRange(members);
 
         await context.SaveChangesAsync(cancellationToken);
     }

@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using ServiceManagement.Application.Common.Auditing;
 using ServiceManagement.Application.Common.Exceptions;
 using ServiceManagement.Application.Common.Interfaces;
+using ServiceManagement.Application.Common.Persistence;
 using ServiceManagement.Application.Common.Security;
 using ServiceManagement.Domain.Auditing;
 using ServiceManagement.Domain.Notifications;
@@ -50,7 +51,14 @@ public sealed class AddTicketCommentCommandHandler : IRequestHandler<AddTicketCo
         _clock = clock;
     }
 
-    public async Task<TicketCommentDto> Handle(
+    public Task<TicketCommentDto> Handle(
+        AddTicketCommentCommand request,
+        CancellationToken cancellationToken)
+        => _dbContext.ExecuteAsync(
+            async token => await AddAsync(request, token),
+            cancellationToken);
+
+    private async Task<TicketCommentDto> AddAsync(
         AddTicketCommentCommand request,
         CancellationToken cancellationToken)
     {
@@ -66,25 +74,17 @@ public sealed class AddTicketCommentCommandHandler : IRequestHandler<AddTicketCo
         var authorId = _currentUser.RequireUserId();
         var comment = ticket.AddComment(request.Content, authorId, request.IsInternal, _clock.UtcNow);
 
-        await _dbContext.SaveChangesAsync(cancellationToken);
+        // A comment on an already-persisted ticket would be tracked as Modified
+        // (ids are generated client-side, so EF cannot detect the new row) and the
+        // UPDATE would match nothing, surfacing as a false concurrency conflict.
+        _dbContext.TicketComments.Add(comment);
 
-        // Internal notes must not leak to the requester.
-        var recipients = new List<Guid>();
-        if (!request.IsInternal)
-        {
-            recipients.Add(ticket.RequesterId);
-        }
+        // Internal notes must not leak to the requester; the rule lives in
+        // one place so comment and status-change notifications cannot drift.
+        var targets = TicketNotificationRules.ForComment(ticket, authorId, request.IsInternal);
 
-        if (ticket.AssignedToId is not null)
-        {
-            recipients.Add(ticket.AssignedToId.Value);
-        }
-
-        var targets = recipients
-            .Where(userId => userId != authorId)
-            .Distinct()
-            .ToList();
-
+        // Staged onto this unit of work, so neither the notification nor the audit
+        // record can survive a failure of the comment that caused them.
         await _notificationService.NotifyManyAsync(
             targets.Select(userId => new NotificationMessage(
                 userId,
@@ -97,15 +97,16 @@ public sealed class AddTicketCommentCommandHandler : IRequestHandler<AddTicketCo
             cancellationToken);
 
         await _auditService.RecordAsync(
-            new AuditEntry(
+            TicketAuditEntry.For(
                 AuditActions.TicketCommentAdded,
                 nameof(TicketComment),
                 comment.Id.ToString(),
-                authorId,
-                _currentUser.IpAddress,
-                _currentUser.CorrelationId,
-                NewValues: AuditJson.Serialize(new { comment.TicketId, IsInternal = comment.IsInternal })),
+                _currentUser,
+                userId: authorId,
+                newValues: AuditJson.Serialize(new { comment.TicketId, IsInternal = comment.IsInternal })),
             cancellationToken);
+
+        await _dbContext.SaveChangesAsync(cancellationToken);
 
         var author = await _dbContext.Users
             .AsNoTracking()

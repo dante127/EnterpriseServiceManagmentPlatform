@@ -42,4 +42,58 @@ public sealed class ProxyOptions
 
     /// <summary>How many proxy hops to strip, matched to the number of proxies in front of the API.</summary>
     public int ForwardLimit { get; set; } = 1;
+
+    /// <summary>
+    /// Rejects a configuration that would enable the proxy but then ignore its
+    /// headers.
+    /// <para>
+    /// This matters more than it looks. With no known proxy the framework falls
+    /// back to trusting only the loopback interface, so on a container network -
+    /// where the proxy arrives from a bridge address - every forwarded header is
+    /// discarded. Nothing warns: login throttling silently collapses into one
+    /// global bucket and every audit record names the proxy rather than the user.
+    /// Failing at startup turns that into an explicit, fixable error.
+    /// </para>
+    /// </summary>
+    public static void Validate(ProxyOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+
+        if (!options.Enabled)
+        {
+            return;
+        }
+
+        if (options.TrustAllForwardedHeaders)
+        {
+            return;
+        }
+
+        if (options.KnownProxies.Length == 0 && options.KnownNetworks.Length == 0)
+        {
+            throw new InvalidOperationException(
+                "Proxy:Enabled is true but neither Proxy:KnownProxies nor Proxy:KnownNetworks is set. "
+                + "Forwarded headers would be ignored, so the client address, the rate-limit key and "
+                + "every audit record would name the proxy. Set the proxy address, or explicitly set "
+                + "Proxy:TrustAllForwardedHeaders to true on a trusted network path.");
+        }
+
+        foreach (var proxy in options.KnownProxies.Where(value => !string.IsNullOrWhiteSpace(value)))
+        {
+            if (!System.Net.IPAddress.TryParse(proxy, out _))
+            {
+                throw new InvalidOperationException(
+                    $"Proxy:KnownProxies contains '{proxy}', which is not a valid IP address.");
+            }
+        }
+
+        foreach (var network in options.KnownNetworks.Where(value => !string.IsNullOrWhiteSpace(value)))
+        {
+            if (!System.Net.IPNetwork.TryParse(network, out _))
+            {
+                throw new InvalidOperationException(
+                    $"Proxy:KnownNetworks contains '{network}', which is not a valid CIDR range.");
+            }
+        }
+    }
 }

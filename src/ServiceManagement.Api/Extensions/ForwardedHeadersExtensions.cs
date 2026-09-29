@@ -28,6 +28,12 @@ public static class ForwardedHeadersExtensions
             return app;
         }
 
+        // Fail at startup rather than run with every forwarded header silently
+        // discarded: with no known proxy the framework trusts only loopback, so on
+        // a container network the client address, the rate-limit key and every
+        // audit record would all name the proxy.
+        ProxyOptions.Validate(options);
+
         var forwarded = new ForwardedHeadersOptions
         {
             ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto,

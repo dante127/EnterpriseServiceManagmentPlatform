@@ -71,6 +71,30 @@ WHERE FirstResponseDueAt IS NULL
 That should return `0`. The repair is idempotent: a second run selects no rows,
 because a repaired ticket no longer satisfies the "both null" predicate.
 
+You can also confirm the targets look sane before trusting the monitor:
+
+```sql
+SELECT TOP 10
+    t.TicketNumber,
+    t.PriorityId,
+    p.Name AS PolicyName,
+    t.ReportedAt,
+    t.FirstResponseDueAt,
+    t.ResolutionDueAt
+FROM dbo.Tickets AS t
+LEFT JOIN dbo.SlaPolicies AS p
+    ON p.Id = (
+        SELECT TOP 1 sp.Id
+        FROM dbo.SlaPolicies AS sp
+        WHERE sp.PriorityId = t.PriorityId AND sp.IsActive = 1
+        ORDER BY sp.CreatedAt DESC, sp.Id DESC
+    )
+WHERE t.FirstResponseDueAt IS NOT NULL
+  AND t.ResolutionDueAt IS NOT NULL
+  AND t.IsDeleted = 0
+ORDER BY t.ChangedAt DESC;
+```
+
 ## Rollback
 
 **There is none, by design.** The values the repair writes are recomputed from

@@ -16,6 +16,11 @@ namespace ServiceManagement.Application.Tickets;
 /// Adds a comment. Internal comments require the
 /// <c>tickets.comment.internal</c> permission, enforced here as well as at the
 /// controller so the rule cannot be bypassed by a new endpoint.
+/// <para>
+/// Permitted on a closed or cancelled ticket: annotating a finished ticket is a
+/// deliberate feature, unlike every other mutation. See <c>Ticket.AddComment</c>
+/// for the reasoning.
+/// </para>
 /// </summary>
 public sealed record AddTicketCommentCommand(Guid TicketId, string Content, bool IsInternal)
     : IRequest<TicketCommentDto>;

@@ -253,6 +253,18 @@ public class Ticket : SoftDeletableEntity
         }
     }
 
+    /// <summary>
+    /// Adds a comment.
+    /// <para>
+    /// Deliberately the one mutation permitted on a terminal ticket. Agents
+    /// routinely annotate a closed or cancelled ticket afterwards - a correction,
+    /// a late finding, a note explaining how it was resolved - and refusing that
+    /// discards information the business wants to keep. Every other mutation
+    /// (details, priority, assignment, status) still calls
+    /// <see cref="EnsureNotTerminal"/>, so a finished ticket cannot be reopened or
+    /// rewritten; a comment is a note on the record, not a change to it.
+    /// </para>
+    /// </summary>
     public TicketComment AddComment(string content, Guid authorId, bool isInternal, DateTimeOffset at)
     {
         var comment = new TicketComment(Id, authorId, content, isInternal, at);

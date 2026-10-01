@@ -71,6 +71,11 @@ public sealed class GetDashboardQueryHandler : IRequestHandler<GetDashboardQuery
                 ticket => ticket.Status != TicketStatus.Closed && ticket.Status != TicketStatus.Cancelled,
                 cancellationToken);
 
+        // The two "last thirty days" figures measure different windows on purpose:
+        // this counts tickets RESOLVED in the window, while the average below
+        // samples tickets REPORTED in it (so a slow ticket still contributes its
+        // own resolution time once done). Align them if the dashboard semantics
+        // should change.
         var resolvedLastThirtyDays = await tickets
             .CountAsync(
                 ticket => ticket.ResolvedAt != null && ticket.ResolvedAt >= thirtyDaysAgo,

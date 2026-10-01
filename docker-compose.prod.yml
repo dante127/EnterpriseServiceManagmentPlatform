@@ -1,15 +1,47 @@
 # Production overlay for the local compose stack.
 #
+#   cp .env.example .env   # REDIS_PASSWORD and Jwt__SigningKey are mandatory here
 #   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 #
 # This is a single-host production shape: one API replica, migrations applied on
 # startup, TLS still expected to terminate at a load balancer in front of it.
+#
+# Unlike the base file, nothing but the API is exposed on host ports: SQL Server
+# and Redis are only reachable from inside the compose network, and Redis sits
+# behind a password ($REDIS_PASSWORD) so a leaked port binding cannot poison the
+# shared cache.
 #
 # It does NOT cover a real orchestrated environment. For Kubernetes or ECS, run
 # the image from docker/Dockerfile directly and supply the same settings through
 # a secret store rather than a .env file on disk.
 
 services:
+  # Base file publishes 1433 for development debugging; production closes it.
+  sqlserver:
+    ports: !reset []
+
+  redis:
+    ports: !reset []
+    command:
+      [
+        "redis-server",
+        "--appendonly",
+        "yes",
+        "--requirepass",
+        "${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env before starting production}",
+      ]
+    environment:
+      REDIS_PASSWORD: "${REDIS_PASSWORD:?}"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "redis-cli --no-auth-warning -a \"$$REDIS_PASSWORD\" ping | grep -q PONG"
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
   api:
     environment:
       # Production keeps Swagger off: it publishes the full route surface.
@@ -22,11 +54,14 @@ services:
       BackgroundJobs__Enabled: "true"
 
       # A shared cache: the in-process fallback is not shared between replicas,
-      # so every replica would hold a different dashboard snapshot.
-      Redis__Configuration: "redis:6379:abortConnect=false"
+      # so every replica would hold a different dashboard snapshot. Auth matches
+      # the --requirepass set on the redis service above.
+      Redis__Configuration: "redis:6379,password=${REDIS_PASSWORD:?},abortConnect=false"
       Redis__Enabled: "true"
 
-      # No user secrets, no development seed data.
+      # E-mail delivery: set Notifications__EmailEnabled=true and provide the
+      # Notifications__Smtp__* variables in .env to switch on real SMTP sending;
+      # otherwise the logging sender is used and mail goes nowhere.
       Notifications__EmailEnabled: "false"
       Database__EnableSensitiveDataLogging: "false"
 

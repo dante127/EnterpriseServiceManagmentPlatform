@@ -4,18 +4,15 @@ namespace ServiceManagement.Domain.Auditing;
 public static class AuditActions
 {
     public const string Login = "Login";
-    public const string LoginFailed = "LoginFailed";
-    public const string Logout = "Logout";
-    public const string TokenRefreshed = "TokenRefreshed";
+    public const string LoginFailed = "LoginFailed";    public const string TokenRefreshed = "TokenRefreshed";
     public const string PasswordChanged = "PasswordChanged";
 
-    public const string UserCreated = "UserCreated";
-    public const string UserUpdated = "UserUpdated";
-    public const string UserDeactivated = "UserDeactivated";
+    public const string UserCreated = "UserCreated";    public const string UserDeactivated = "UserDeactivated";
     public const string UserActivated = "UserActivated";
     public const string UserRoleChanged = "UserRoleChanged";
 
     public const string OrganizationCreated = "OrganizationCreated";
+    public const string DepartmentCreated = "DepartmentCreated";
     public const string TeamCreated = "TeamCreated";
     public const string TeamMemberAdded = "TeamMemberAdded";
     public const string TeamMemberRemoved = "TeamMemberRemoved";

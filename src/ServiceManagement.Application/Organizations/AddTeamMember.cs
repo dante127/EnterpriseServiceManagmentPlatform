@@ -26,15 +26,18 @@ public sealed class AddTeamMemberCommandHandler : IRequestHandler<AddTeamMemberC
     private readonly IApplicationDbContext _dbContext;
     private readonly IAuditService _auditService;
     private readonly ICurrentUserService _currentUser;
+    private readonly IDateTimeProvider _clock;
 
     public AddTeamMemberCommandHandler(
         IApplicationDbContext dbContext,
         IAuditService auditService,
-        ICurrentUserService currentUser)
+        ICurrentUserService currentUser,
+        IDateTimeProvider clock)
     {
         _dbContext = dbContext;
         _auditService = auditService;
         _currentUser = currentUser;
+        _clock = clock;
     }
 
     public async Task<TeamMemberDto> Handle(AddTeamMemberCommand request, CancellationToken cancellationToken)
@@ -45,17 +48,15 @@ public sealed class AddTeamMemberCommandHandler : IRequestHandler<AddTeamMemberC
             ?? throw new NotFoundException(nameof(Team), request.TeamId);
 
         var user = await _dbContext.Users
-            .FirstOrDefaultAsync(candidate => candidate.Id == request.UserId, cancellationToken)
+            .FirstOrDefaultAsync(candidate => candidate.Id == request.UserId && candidate.IsActive, cancellationToken)
             ?? throw new NotFoundException("User", request.UserId);
 
-        var member = team.AddMember(user.Id, request.IsManager);
+        var member = team.AddMember(user.Id, _clock.UtcNow, request.IsManager);
 
         if (request.IsManager)
         {
             team.SetManager(user.Id);
         }
-
-        await _dbContext.SaveChangesAsync(cancellationToken);
 
         await _auditService.RecordAsync(
             new AuditEntry(
@@ -67,6 +68,8 @@ public sealed class AddTeamMemberCommandHandler : IRequestHandler<AddTeamMemberC
                 _currentUser.CorrelationId,
                 NewValues: Common.Auditing.AuditJson.Serialize(new { UserId = user.Id, user.Email, IsManager = request.IsManager })),
             cancellationToken);
+
+        await _dbContext.SaveChangesAsync(cancellationToken);
 
         return new TeamMemberDto(user.Id, user.FullName, user.Email, member.IsManager, member.JoinedAt);
     }

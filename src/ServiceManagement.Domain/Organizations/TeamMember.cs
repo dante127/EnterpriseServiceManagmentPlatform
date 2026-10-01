@@ -10,12 +10,12 @@ public class TeamMember : BaseEntity
     {
     }
 
-    public TeamMember(Guid teamId, Guid userId, bool isManager = false)
+    public TeamMember(Guid teamId, Guid userId, DateTimeOffset joinedAt, bool isManager = false)
     {
         TeamId = Guard.NotEmpty(teamId, nameof(teamId));
         UserId = Guard.NotEmpty(userId, nameof(userId));
         IsManager = isManager;
-        JoinedAt = DateTimeOffset.UtcNow;
+        JoinedAt = joinedAt;
     }
 
     public Guid TeamId { get; private set; }

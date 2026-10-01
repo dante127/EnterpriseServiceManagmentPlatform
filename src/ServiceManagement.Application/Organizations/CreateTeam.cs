@@ -66,7 +66,7 @@ public sealed class CreateTeamCommandHandler : IRequestHandler<CreateTeamCommand
         if (request.ManagerId is not null)
         {
             var managerExists = await _dbContext.Users
-                .AnyAsync(user => user.Id == request.ManagerId, cancellationToken);
+                .AnyAsync(user => user.Id == request.ManagerId && user.IsActive, cancellationToken);
 
             if (!managerExists)
             {
@@ -77,7 +77,6 @@ public sealed class CreateTeamCommandHandler : IRequestHandler<CreateTeamCommand
         }
 
         _dbContext.Teams.Add(team);
-        await _dbContext.SaveChangesAsync(cancellationToken);
 
         await _auditService.RecordAsync(
             new AuditEntry(
@@ -88,6 +87,8 @@ public sealed class CreateTeamCommandHandler : IRequestHandler<CreateTeamCommand
                 _currentUser.IpAddress,
                 _currentUser.CorrelationId),
             cancellationToken);
+
+        await _dbContext.SaveChangesAsync(cancellationToken);
 
         return new TeamDto(
             team.Id,

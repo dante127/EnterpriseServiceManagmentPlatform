@@ -42,15 +42,9 @@ public class Team : AuditableEntity
 
     public IReadOnlyCollection<TeamMember> Members => _members.AsReadOnly();
 
-    public void UpdateDetails(string name, string? description)
-    {
-        Name = Guard.NotBlank(name, nameof(name), 200);
-        Description = description?.Trim();
-    }
-
     public void SetManager(Guid? managerId) => ManagerId = managerId;
 
-    public TeamMember AddMember(Guid userId, bool isManager = false)
+    public TeamMember AddMember(Guid userId, DateTimeOffset joinedAt, bool isManager = false)
     {
         var existing = _members.FirstOrDefault(m => m.UserId == userId);
         if (existing is not null)
@@ -58,7 +52,7 @@ public class Team : AuditableEntity
             return existing;
         }
 
-        var member = new TeamMember(Id, userId, isManager);
+        var member = new TeamMember(Id, userId, joinedAt, isManager);
         _members.Add(member);
         return member;
     }

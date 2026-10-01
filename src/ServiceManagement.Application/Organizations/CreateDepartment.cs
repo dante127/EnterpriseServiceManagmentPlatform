@@ -24,20 +24,58 @@ public sealed class CreateDepartmentCommandValidator : AbstractValidator<CreateD
 public sealed class CreateDepartmentCommandHandler : IRequestHandler<CreateDepartmentCommand, DepartmentDto>
 {
     private readonly IApplicationDbContext _dbContext;
+    private readonly IAuditService _auditService;
+    private readonly ICurrentUserService _currentUser;
 
-    public CreateDepartmentCommandHandler(IApplicationDbContext dbContext)
+    public CreateDepartmentCommandHandler(
+        IApplicationDbContext dbContext,
+        IAuditService auditService,
+        ICurrentUserService currentUser)
     {
         _dbContext = dbContext;
+        _auditService = auditService;
+        _currentUser = currentUser;
     }
 
     public async Task<DepartmentDto> Handle(CreateDepartmentCommand request, CancellationToken cancellationToken)
     {
-        var organization = await _dbContext.Organizations
-            .Include(candidate => candidate.Departments)
-            .FirstOrDefaultAsync(candidate => candidate.Id == request.OrganizationId, cancellationToken)
-            ?? throw new NotFoundException(nameof(Organization), request.OrganizationId);
+        // Sibling conventions: existence is checked with a query rather than an
+        // Include of the whole department collection, a duplicate code is a 409
+        // (the unique index would otherwise turn it into a 500), and the change
+        // is audited like every other organizational change.
+        var organizationExists = await _dbContext.Organizations
+            .AnyAsync(candidate => candidate.Id == request.OrganizationId, cancellationToken);
 
-        var department = organization.AddDepartment(request.Name, request.Code, request.Description);
+        if (!organizationExists)
+        {
+            throw new NotFoundException(nameof(Organization), request.OrganizationId);
+        }
+
+        var code = request.Code.Trim().ToUpperInvariant();
+
+        var codeTaken = await _dbContext.Departments
+            .AnyAsync(department =>
+                department.OrganizationId == request.OrganizationId && department.Code == code,
+                cancellationToken);
+
+        if (codeTaken)
+        {
+            throw new ConflictException($"A department with code '{code}' already exists in this organization.");
+        }
+
+        var department = new Department(request.OrganizationId, request.Name, code, request.Description);
+        _dbContext.Departments.Add(department);
+
+        await _auditService.RecordAsync(
+            new AuditEntry(
+                AuditActions.DepartmentCreated,
+                nameof(Department),
+                department.Id.ToString(),
+                _currentUser.UserId,
+                _currentUser.IpAddress,
+                _currentUser.CorrelationId),
+            cancellationToken);
+
         await _dbContext.SaveChangesAsync(cancellationToken);
 
         return new DepartmentDto(

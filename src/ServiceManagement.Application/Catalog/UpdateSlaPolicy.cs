@@ -24,6 +24,12 @@ public sealed class UpdateSlaPolicyCommandValidator : AbstractValidator<UpdateSl
         RuleFor(command => command.FirstResponseMinutes).GreaterThan(0);
         RuleFor(command => command.ResolutionMinutes).GreaterThan(0);
         RuleFor(command => command.AtRiskThresholdPercent).InclusiveBetween(1, 99);
+
+        // Same invariant creation enforces: an updated policy must not be able to
+        // promise a resolution before the first response is even due.
+        RuleFor(command => command.ResolutionMinutes)
+            .GreaterThanOrEqualTo(command => command.FirstResponseMinutes)
+            .WithMessage("The resolution target must not be shorter than the first response target.");
     }
 }
 
@@ -65,11 +71,6 @@ public sealed class UpdateSlaPolicyCommandHandler : IRequestHandler<UpdateSlaPol
             request.ResolutionMinutes,
             request.AtRiskThresholdPercent);
 
-        await _dbContext.SaveChangesAsync(cancellationToken);
-
-        // SLA policies are cached; invalidate so new tickets pick up the change.
-        await _cache.RemoveAsync(CacheKeys.SlaPolicies, cancellationToken);
-
         await _auditService.RecordAsync(
             new AuditEntry(
                 AuditActions.SlaPolicyChanged,
@@ -86,6 +87,11 @@ public sealed class UpdateSlaPolicyCommandHandler : IRequestHandler<UpdateSlaPol
                     policy.AtRiskThresholdPercent
                 })),
             cancellationToken);
+
+        await _dbContext.SaveChangesAsync(cancellationToken);
+
+        // SLA policies are cached; invalidate so new tickets pick up the change.
+        await _cache.RemoveAsync(CacheKeys.SlaPolicies, cancellationToken);
 
         return new SlaPolicyDto(
             policy.Id,

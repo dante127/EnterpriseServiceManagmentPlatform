@@ -68,8 +68,6 @@ public sealed class SetUserActivationCommandHandler : IRequestHandler<SetUserAct
             }
         }
 
-        await _dbContext.SaveChangesAsync(cancellationToken);
-
         await _auditService.RecordAsync(
             new AuditEntry(
                 request.IsActive ? AuditActions.UserActivated : AuditActions.UserDeactivated,
@@ -79,6 +77,8 @@ public sealed class SetUserActivationCommandHandler : IRequestHandler<SetUserAct
                 _currentUser.IpAddress,
                 _currentUser.CorrelationId),
             cancellationToken);
+
+        await _dbContext.SaveChangesAsync(cancellationToken);
 
         return Unit.Value;
     }

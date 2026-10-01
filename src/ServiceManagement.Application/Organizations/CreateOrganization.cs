@@ -53,7 +53,6 @@ public sealed class CreateOrganizationCommandHandler
 
         var organization = new Organization(request.Name, code, request.Description);
         _dbContext.Organizations.Add(organization);
-        await _dbContext.SaveChangesAsync(cancellationToken);
 
         await _auditService.RecordAsync(
             new AuditEntry(
@@ -64,6 +63,8 @@ public sealed class CreateOrganizationCommandHandler
                 _currentUser.IpAddress,
                 _currentUser.CorrelationId),
             cancellationToken);
+
+        await _dbContext.SaveChangesAsync(cancellationToken);
 
         return new OrganizationDto(
             organization.Id,

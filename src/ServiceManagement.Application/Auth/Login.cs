@@ -76,6 +76,10 @@ public sealed class LoginCommandHandler : IRequestHandler<LoginCommand, AuthToke
                     _currentUser.CorrelationId),
                 cancellationToken);
 
+            // Nothing else is pending on this failure path, so flush here: without
+            // a save the staged audit row dies with the thrown exception.
+            await _dbContext.SaveChangesAsync(cancellationToken);
+
             throw new UnauthorizedException("Invalid e-mail or password.");
         }
 
@@ -96,7 +100,6 @@ public sealed class LoginCommandHandler : IRequestHandler<LoginCommand, AuthToke
             _currentUser.IpAddress));
 
         user.RecordLogin(now);
-        await _dbContext.SaveChangesAsync(cancellationToken);
 
         await _auditService.RecordAsync(
             new AuditEntry(
@@ -107,6 +110,8 @@ public sealed class LoginCommandHandler : IRequestHandler<LoginCommand, AuthToke
                 _currentUser.IpAddress,
                 _currentUser.CorrelationId),
             cancellationToken);
+
+        await _dbContext.SaveChangesAsync(cancellationToken);
 
         return new AuthTokenDto(
             accessToken.Token,

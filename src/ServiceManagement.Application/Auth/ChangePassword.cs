@@ -84,8 +84,6 @@ public sealed class ChangePasswordCommandHandler : IRequestHandler<ChangePasswor
             token.Revoke(_clock.UtcNow, _currentUser.IpAddress, "PasswordChanged");
         }
 
-        await _dbContext.SaveChangesAsync(cancellationToken);
-
         await _auditService.RecordAsync(
             new AuditEntry(
                 AuditActions.PasswordChanged,
@@ -95,6 +93,8 @@ public sealed class ChangePasswordCommandHandler : IRequestHandler<ChangePasswor
                 _currentUser.IpAddress,
                 _currentUser.CorrelationId),
             cancellationToken);
+
+        await _dbContext.SaveChangesAsync(cancellationToken);
 
         return Unit.Value;
     }

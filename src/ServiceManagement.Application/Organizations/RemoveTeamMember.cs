@@ -49,8 +49,6 @@ public sealed class RemoveTeamMemberCommandHandler : IRequestHandler<RemoveTeamM
             team.SetManager(null);
         }
 
-        await _dbContext.SaveChangesAsync(cancellationToken);
-
         await _auditService.RecordAsync(
             new AuditEntry(
                 AuditActions.TeamMemberRemoved,
@@ -60,6 +58,8 @@ public sealed class RemoveTeamMemberCommandHandler : IRequestHandler<RemoveTeamM
                 _currentUser.IpAddress,
                 _currentUser.CorrelationId),
             cancellationToken);
+
+        await _dbContext.SaveChangesAsync(cancellationToken);
 
         return Unit.Value;
     }

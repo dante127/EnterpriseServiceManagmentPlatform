@@ -81,12 +81,6 @@ public sealed class AssignUserRolesCommandHandler : IRequestHandler<AssignUserRo
             user.AddRole(role.Id);
         }
 
-        await _dbContext.SaveChangesAsync(cancellationToken);
-
-        // Permission lookups are cached, so the cache must be invalidated.
-        await _cache.RemoveAsync(Common.Caching.CacheKeys.UserPermissions(user.Id), cancellationToken);
-        await _cache.RemoveAsync(Common.Caching.CacheKeys.UserRoles(user.Id), cancellationToken);
-
         await _auditService.RecordAsync(
             new AuditEntry(
                 AuditActions.UserRoleChanged,
@@ -98,6 +92,8 @@ public sealed class AssignUserRolesCommandHandler : IRequestHandler<AssignUserRo
                 Common.Auditing.AuditJson.Serialize(new { Roles = previousRoles }),
                 Common.Auditing.AuditJson.Serialize(new { Roles = roles.Select(role => role.Name) })),
             cancellationToken);
+
+        await _dbContext.SaveChangesAsync(cancellationToken);
 
         return Unit.Value;
     }

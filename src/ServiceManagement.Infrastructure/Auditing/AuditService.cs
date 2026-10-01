@@ -100,6 +100,18 @@ public sealed class AuditService : IAuditService
                 continue;
             }
 
+            // Sensitive keys hide inside arrays too: a payload like
+            // changes: [ { "passwordHash": ... } ] must not slip through.
+            if (property.Value is JsonArray array)
+            {
+                foreach (var element in array.OfType<JsonObject>())
+                {
+                    RedactNode(element);
+                }
+
+                continue;
+            }
+
             if (IsSensitive(property.Key))
             {
                 node[property.Key] = "***redacted***";

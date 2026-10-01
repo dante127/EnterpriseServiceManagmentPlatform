@@ -186,8 +186,25 @@ public sealed class SlaCycle
                 continue;
             }
 
-            // Best effort: e-mail problems must not fail the monitoring cycle.
-            await _emailSender.SendAsync(email, notification.Title, notification.Message, cancellationToken);
+            // Best effort: e-mail problems must not fail the monitoring cycle, so
+            // every send is isolated - one broken mailbox or a dead SMTP server
+            // delays nobody else's notification and leaves the recorded state hit.
+            try
+            {
+                await _emailSender.SendAsync(email, notification.Title, notification.Message, cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception exception)
+            {
+                _logger.LogError(
+                    exception,
+                    "Failed to send the SLA e-mail '{Subject}' to {Recipient}.",
+                    notification.Title,
+                    email);
+            }
         }
     }
 }

@@ -39,7 +39,7 @@ public static class DependencyInjection
         services.AddPersistence(configuration);
         services.AddCaching(configuration);
         services.AddSecurity(configuration);
-        services.AddMessaging();
+        services.AddMessaging(configuration);
         services.AddBackgroundProcessing();
 
         return services;
@@ -57,7 +57,12 @@ public static class DependencyInjection
         services.AddValidatedOptions<SlaOptions>(configuration, SlaOptions.SectionName);
         services.AddValidatedOptions<BackgroundJobOptions>(configuration, BackgroundJobOptions.SectionName);
         services.AddValidatedOptions<NotificationsOptions>(configuration, NotificationsOptions.SectionName);
+        services.AddValidatedOptions<SmtpOptions>(configuration, SmtpOptions.SectionName);
         services.AddValidatedOptions<ProxyOptions>(configuration, ProxyOptions.SectionName);
+
+        // Conditional rules the DataAnnotations attributes cannot express: the
+        // SMTP section is only bound when a host is configured.
+        services.AddSingleton<IValidateOptions<SmtpOptions>, SmtpOptionsValidator>();
     }
 
     /// <summary>
@@ -199,11 +204,25 @@ public static class DependencyInjection
         services.AddAuthorization();
     }
 
-    private static void AddMessaging(this IServiceCollection services)
+    private static void AddMessaging(this IServiceCollection services, IConfiguration configuration)
     {
         services.AddScoped<INotificationService, DatabaseNotificationService>();
-        services.AddScoped<IEmailSender, LoggingEmailSender>();
         services.AddScoped<IAuditService, AuditService>();
+
+        // Real SMTP delivery when a host is configured; otherwise the logging
+        // sender keeps the e-mail channel observable instead of silently gone.
+        var smtp = configuration
+            .GetSection(SmtpOptions.SectionName)
+            .Get<SmtpOptions>() ?? new SmtpOptions();
+
+        if (string.IsNullOrWhiteSpace(smtp.Host))
+        {
+            services.AddScoped<IEmailSender, LoggingEmailSender>();
+        }
+        else
+        {
+            services.AddScoped<IEmailSender, SmtpEmailSender>();
+        }
     }
 
     private static void AddBackgroundProcessing(this IServiceCollection services)

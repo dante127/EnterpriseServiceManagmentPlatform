@@ -55,7 +55,6 @@ public sealed class CreateUserCommandHandler : IRequestHandler<CreateUserCommand
     private readonly IPasswordHasher _passwordHasher;
     private readonly IAuditService _auditService;
     private readonly ICurrentUserService _currentUser;
-    private readonly ICacheService _cache;
     private readonly IDateTimeProvider _clock;
 
     public CreateUserCommandHandler(
@@ -63,14 +62,12 @@ public sealed class CreateUserCommandHandler : IRequestHandler<CreateUserCommand
         IPasswordHasher passwordHasher,
         IAuditService auditService,
         ICurrentUserService currentUser,
-        ICacheService cache,
         IDateTimeProvider clock)
     {
         _dbContext = dbContext;
         _passwordHasher = passwordHasher;
         _auditService = auditService;
         _currentUser = currentUser;
-        _cache = cache;
         _clock = clock;
     }
 
@@ -134,8 +131,6 @@ public sealed class CreateUserCommandHandler : IRequestHandler<CreateUserCommand
 
         _dbContext.Users.Add(user);
 
-        await _cache.RemoveAsync(CacheKeys.UserPermissions(user.Id), cancellationToken);
-        await _cache.RemoveAsync(CacheKeys.UserRoles(user.Id), cancellationToken);
 
         // Staged, not yet written: the audit record joins the same unit of work.
         await _auditService.RecordAsync(

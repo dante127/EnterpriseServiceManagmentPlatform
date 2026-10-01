@@ -32,16 +32,6 @@ public class Organization : AuditableEntity
 
     public IReadOnlyCollection<Team> Teams => _teams.AsReadOnly();
 
-    public void UpdateDetails(string name, string? description)
-    {
-        Name = Guard.NotBlank(name, nameof(name), 200);
-        Description = description?.Trim();
-    }
-
-    public void Activate() => IsActive = true;
-
-    public void Deactivate() => IsActive = false;
-
     public Department AddDepartment(string name, string code, string? description = null)
     {
         var department = new Department(Id, name, code, description);

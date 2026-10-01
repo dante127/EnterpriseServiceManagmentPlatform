@@ -37,5 +37,5 @@ public static class TicketAccessPolicy
         => !isInternal || CanViewInternalComments(permissions);
 
     public static bool CanModifyTicket(Domain.Tickets.TicketStatus status)
-        => status is not (Domain.Tickets.TicketStatus.Closed or Domain.Tickets.TicketStatus.Cancelled);
+        => !Domain.Tickets.TicketWorkflow.IsTerminal(status);
 }

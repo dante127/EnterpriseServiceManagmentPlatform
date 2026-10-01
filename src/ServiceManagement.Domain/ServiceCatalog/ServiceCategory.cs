@@ -36,14 +36,4 @@ public class ServiceCategory : AuditableEntity
     public IReadOnlyCollection<ServiceCategory> Children => _children.AsReadOnly();
 
     public IReadOnlyCollection<Service> Services => _services.AsReadOnly();
-
-    public void UpdateDetails(string name, string? description)
-    {
-        Name = Guard.NotBlank(name, nameof(name), 200);
-        Description = description?.Trim();
-    }
-
-    public void Activate() => IsActive = true;
-
-    public void Deactivate() => IsActive = false;
 }

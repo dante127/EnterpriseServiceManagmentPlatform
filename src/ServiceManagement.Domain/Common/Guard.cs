@@ -8,10 +8,6 @@ namespace ServiceManagement.Domain.Common;
 /// </summary>
 public static class Guard
 {
-    public static T NotNull<T>(T? value, string name)
-        where T : class
-        => value ?? throw new DomainRuleViolationException($"{name} is required.");
-
     public static string NotBlank(string? value, string name, int maxLength = 4000)
     {
         if (string.IsNullOrWhiteSpace(value))

@@ -65,8 +65,4 @@ public class Service : AuditableEntity
         DefaultPriorityId = defaultPriorityId;
         DefaultSlaPolicyId = defaultSlaPolicyId;
     }
-
-    public void Activate() => IsActive = true;
-
-    public void Deactivate() => IsActive = false;
 }

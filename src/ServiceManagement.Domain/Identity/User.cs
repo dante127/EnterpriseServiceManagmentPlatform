@@ -71,12 +71,6 @@ public class User : AuditableEntity
         SecurityStamp = Guid.NewGuid().ToString("N");
     }
 
-    public void UpdateProfile(string firstName, string lastName)
-    {
-        FirstName = Guard.NotBlank(firstName, nameof(firstName), 128);
-        LastName = Guard.NotBlank(lastName, nameof(lastName), 128);
-    }
-
     public void Activate() => IsActive = true;
 
     public void Deactivate()

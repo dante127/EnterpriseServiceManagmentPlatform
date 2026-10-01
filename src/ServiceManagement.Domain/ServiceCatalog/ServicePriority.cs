@@ -34,14 +34,4 @@ public class ServicePriority : AuditableEntity
     public bool IsActive { get; private set; }
 
     public IReadOnlyCollection<SlaPolicy> SlaPolicies => _slaPolicies.AsReadOnly();
-
-    public void UpdateDetails(string name, string? colorHex)
-    {
-        Name = Guard.NotBlank(name, nameof(name), 100);
-        ColorHex = colorHex?.Trim();
-    }
-
-    public void Activate() => IsActive = true;
-
-    public void Deactivate() => IsActive = false;
 }

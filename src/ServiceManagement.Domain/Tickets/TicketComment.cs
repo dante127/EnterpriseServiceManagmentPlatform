@@ -33,9 +33,4 @@ public class TicketComment : AuditableEntity
     public Ticket Ticket { get; private set; } = null!;
 
     public User Author { get; private set; } = null!;
-
-    public void Edit(string content)
-    {
-        Content = Guard.NotBlank(content, nameof(content), 4000);
-    }
 }

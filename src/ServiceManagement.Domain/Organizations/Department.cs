@@ -30,10 +30,4 @@ public class Department : AuditableEntity
     public Organization Organization { get; private set; } = null!;
 
     public IReadOnlyCollection<Team> Teams => _teams.AsReadOnly();
-
-    public void UpdateDetails(string name, string? description)
-    {
-        Name = Guard.NotBlank(name, nameof(name), 200);
-        Description = description?.Trim();
-    }
 }

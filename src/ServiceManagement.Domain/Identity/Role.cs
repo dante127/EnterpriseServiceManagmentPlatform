@@ -32,12 +32,6 @@ public class Role : AuditableEntity
 
     public IReadOnlyCollection<UserRole> UserRoles => _userRoles.AsReadOnly();
 
-    public void Rename(string name)
-    {
-        Name = Guard.NotBlank(name, nameof(name), 128);
-        NormalizedName = Name.ToUpperInvariant();
-    }
-
     public void GrantPermission(Guid permissionId)
     {
         if (_rolePermissions.Any(rp => rp.PermissionId == permissionId))
@@ -47,7 +41,4 @@ public class Role : AuditableEntity
 
         _rolePermissions.Add(new RolePermission(Id, permissionId));
     }
-
-    public void RevokePermission(Guid permissionId)
-        => _rolePermissions.RemoveAll(rp => rp.PermissionId == permissionId);
 }

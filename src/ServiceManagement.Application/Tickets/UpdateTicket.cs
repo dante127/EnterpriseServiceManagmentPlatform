@@ -71,6 +71,9 @@ public sealed class UpdateTicketCommandHandler : IRequestHandler<UpdateTicketCom
 
                 if (request.PriorityId is not null && request.PriorityId != previous.PriorityId)
                 {
+                    // Unlike CreateTicket, no preferred policy is passed: a priority
+                    // change adopts the new priority's own policy, not the service's
+                    // preferred one. Revisit if the service default should win here.
                     await _slaPolicyResolver.ApplyToAsync(
                         ticket,
                         request.PriorityId.Value,

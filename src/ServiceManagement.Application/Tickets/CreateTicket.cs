@@ -6,6 +6,7 @@ using ServiceManagement.Application.Common.Exceptions;
 using ServiceManagement.Application.Common.Interfaces;
 using ServiceManagement.Application.Common.Persistence;
 using ServiceManagement.Domain.Auditing;
+using ServiceManagement.Domain.Constants;
 using ServiceManagement.Domain.Notifications;
 using ServiceManagement.Domain.Organizations;
 using ServiceManagement.Domain.ServiceCatalog;
@@ -41,6 +42,10 @@ public sealed class CreateTicketCommandValidator : AbstractValidator<CreateTicke
 
         RuleFor(command => command.ServiceId).NotEmpty().WithMessage("Service is required.");
         RuleFor(command => command.CategoryId).NotEmpty().WithMessage("Category is required.");
+
+        // The column behind the filtered unique index is nvarchar(450); a longer
+        // key would otherwise surface as a SQL truncation error, i.e. a 500.
+        RuleFor(command => command.IdempotencyKey).MaximumLength(450);
     }
 }
 
@@ -79,11 +84,11 @@ public sealed class CreateTicketCommandHandler : IRequestHandler<CreateTicketCom
 
     private async Task<TicketDetailDto> CreateAsync(CreateTicketCommand request, CancellationToken cancellationToken)
     {
-        // Idempotent replay: the same key never produces a second ticket.
-        if (!string.IsNullOrWhiteSpace(request.IdempotencyKey))
-        {
-            var key = request.IdempotencyKey.Trim();
+        var key = request.IdempotencyKey?.Trim();
 
+        // Idempotent replay: the same key never produces a second ticket.
+        if (!string.IsNullOrWhiteSpace(key))
+        {
             var existingTicketId = await _dbContext.Tickets
                 .AsNoTracking()
                 .Where(ticket => ticket.IdempotencyKey == key)
@@ -92,7 +97,7 @@ public sealed class CreateTicketCommandHandler : IRequestHandler<CreateTicketCom
 
             if (existingTicketId is not null)
             {
-                return await LoadDetailAsync(existingTicketId.Value, cancellationToken);
+                return await TicketQueries.LoadDetailAsync(_dbContext, existingTicketId.Value, cancellationToken);
             }
         }
 
@@ -133,7 +138,12 @@ public sealed class CreateTicketCommandHandler : IRequestHandler<CreateTicketCom
             throw new NotFoundException(nameof(ServicePriority), priorityId);
         }
 
-        var requesterId = request.RequesterId ?? _currentUser.RequireUserId();
+        // Creating a ticket on behalf of someone else is a privileged action;
+        // without this gate any requester could forge tickets attributed to
+        // other users. tickets.manage is otherwise granted only to staff roles.
+        var requesterId = request.RequesterId is not null && _currentUser.HasPermission(Permissions.TicketsManage)
+            ? request.RequesterId.Value
+            : _currentUser.RequireUserId();
 
         if (!await _dbContext.Users.AnyAsync(user => user.Id == requesterId, cancellationToken))
         {
@@ -159,7 +169,7 @@ public sealed class CreateTicketCommandHandler : IRequestHandler<CreateTicketCom
             requesterId,
             now);
 
-        ticket.SetIdempotencyKey(request.IdempotencyKey);
+        ticket.SetIdempotencyKey(key);
 
         if (request.AssignedTeamId is not null)
         {
@@ -182,10 +192,14 @@ public sealed class CreateTicketCommandHandler : IRequestHandler<CreateTicketCom
                 .Select(member => member.UserId)
                 .ToListAsync(cancellationToken);
 
+            // The same actor-exclusion and dedupe rules as every other ticket
+            // notification: the creator must not be told about their own ticket.
+            var targets = TicketNotificationRules.ForTeamAssignment(memberIds, requesterId);
+
             // Staged onto this unit of work, so the notification cannot outlive a
             // ticket that was never created.
             await _notificationService.NotifyManyAsync(
-                memberIds.Select(memberId => new NotificationMessage(
+                targets.Select(memberId => new NotificationMessage(
                     memberId,
                     NotificationType.TicketAssigned,
                     "New ticket for your team",
@@ -213,15 +227,29 @@ public sealed class CreateTicketCommandHandler : IRequestHandler<CreateTicketCom
                 })),
             cancellationToken);
 
-        await _dbContext.SaveChangesAsync(cancellationToken);
+        try
+        {
+            await _dbContext.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException) when (key is not null)
+        {
+            // A concurrent retry with the same key won the filtered unique index
+            // race. Serve the winner's ticket: surfacing a 500 here would defeat
+            // the entire point of the idempotency key.
+            var winnerId = await _dbContext.Tickets
+                .AsNoTracking()
+                .Where(ticket => ticket.IdempotencyKey == key)
+                .Select(ticket => (Guid?)ticket.Id)
+                .FirstOrDefaultAsync(cancellationToken);
 
-        return await LoadDetailAsync(ticket.Id, cancellationToken);
+            if (winnerId is null)
+            {
+                throw;
+            }
+
+            return await TicketQueries.LoadDetailAsync(_dbContext, winnerId.Value, cancellationToken);
+        }
+
+        return await TicketQueries.LoadDetailAsync(_dbContext, ticket.Id, cancellationToken);
     }
-
-    private Task<TicketDetailDto> LoadDetailAsync(Guid ticketId, CancellationToken cancellationToken)
-        => _dbContext.Tickets
-            .AsNoTracking()
-            .Where(ticket => ticket.Id == ticketId)
-            .ToDetailDto()
-            .FirstAsync(cancellationToken);
 }

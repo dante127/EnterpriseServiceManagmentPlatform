@@ -39,6 +39,13 @@ internal static class TicketNotificationRules
     public static IReadOnlyList<Guid> ForStatusChange(Ticket ticket, Guid actorId)
         => Build(new[] { ticket.RequesterId, ticket.AssignedToId }, actorId);
 
+    /// <summary>
+    /// Resolves the recipients when a ticket is created already assigned to a
+    /// team: every member of the team, minus the actor who raised it.
+    /// </summary>
+    public static IReadOnlyList<Guid> ForTeamAssignment(IEnumerable<Guid> memberIds, Guid actorId)
+        => Build(memberIds.Select(memberId => (Guid?)memberId), actorId);
+
     private static IReadOnlyList<Guid> Build(IEnumerable<Guid?> candidates, Guid actorId)
     {
         ArgumentNullException.ThrowIfNull(candidates);

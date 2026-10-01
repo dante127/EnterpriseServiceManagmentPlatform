@@ -71,7 +71,8 @@ public sealed class AssignTicketCommandHandler : IRequestHandler<AssignTicketCom
 
                 var wasAssigned = ticket.AssignedToId is not null || ticket.AssignedTeamId is not null;
                 var previousAssigneeId = ticket.AssignedToId;
-                TicketAssignmentHistory? assignment = null;
+                var previousTeamId = ticket.AssignedTeamId;
+                var assignments = new List<TicketAssignmentHistory>();
 
                 if (request.AssigneeId is not null)
                 {
@@ -83,7 +84,7 @@ public sealed class AssignTicketCommandHandler : IRequestHandler<AssignTicketCom
                         throw new NotFoundException("User", request.AssigneeId);
                     }
 
-                    assignment = ticket.AssignToUser(request.AssigneeId.Value, changedBy, request.Reason, now);
+                    assignments.Add(ticket.AssignToUser(request.AssigneeId.Value, changedBy, request.Reason, now));
                 }
 
                 if (request.TeamId is not null)
@@ -96,14 +97,15 @@ public sealed class AssignTicketCommandHandler : IRequestHandler<AssignTicketCom
                         throw new NotFoundException(nameof(Team), request.TeamId);
                     }
 
-                    assignment = ticket.AssignToTeam(request.TeamId.Value, changedBy, request.Reason, now);
+                    assignments.Add(ticket.AssignToTeam(request.TeamId.Value, changedBy, request.Reason, now));
                 }
 
                 // Trail rows are children of an already-persisted ticket. Because ids
                 // are generated client-side, EF cannot tell them apart from stored rows
                 // and would issue an UPDATE that matches nothing, reported as a false
-                // concurrency conflict. They must be added explicitly.
-                if (assignment is not null)
+                // concurrency conflict. They must be added explicitly - and every row
+                // kept: a request may assign a user and a team in one call.
+                foreach (var assignment in assignments)
                 {
                     _dbContext.TicketAssignmentHistories.Add(assignment);
                 }
@@ -156,7 +158,7 @@ public sealed class AssignTicketCommandHandler : IRequestHandler<AssignTicketCom
                         ticket.Id.ToString(),
                         _currentUser,
                         userId: changedBy,
-                        oldValues: AuditJson.Serialize(new { AssignedToId = previousAssigneeId }),
+                        oldValues: AuditJson.Serialize(new { AssignedToId = previousAssigneeId, AssignedTeamId = previousTeamId }),
                         newValues: AuditJson.Serialize(new { ticket.AssignedToId, ticket.AssignedTeamId, request.Reason })),
                     token);
 

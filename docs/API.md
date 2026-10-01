@@ -225,7 +225,13 @@ curl -G http://localhost:8080/api/v1/tickets \
 ### Idempotent creation
 
 Send `idempotencyKey` to make retries safe. A repeat call returns the **existing** ticket (200 semantics
-via the same envelope) rather than creating a second one.
+via the same envelope) rather than creating a second one — including when two retries race: the request
+that loses the unique-index race is served the winner's ticket instead of an error.
+
+### Creating on behalf of another user
+
+The optional `requesterId` field is honored only for callers holding `tickets.manage`; everyone else
+gets their own id stamped as the requester, whatever the payload says.
 
 ### Concurrency
 

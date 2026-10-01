@@ -38,4 +38,14 @@ public static class TicketAccessPolicy
 
     public static bool CanModifyTicket(Domain.Tickets.TicketStatus status)
         => !Domain.Tickets.TicketWorkflow.IsTerminal(status);
+
+    /// <summary>
+    /// Staff visibility: the whole queue. Callers without one of these permissions
+    /// - typically requesters - see only the tickets they raised, in every ticket
+    /// read path (search, detail, history).
+    /// </summary>
+    public static bool CanViewAllTickets(IReadOnlyCollection<string> permissions)
+        => PermissionEvaluator.HasPermission(permissions, Permissions.TicketsUpdate)
+        || PermissionEvaluator.HasPermission(permissions, Permissions.TicketsAssign)
+        || PermissionEvaluator.HasPermission(permissions, Permissions.TicketsManage);
 }

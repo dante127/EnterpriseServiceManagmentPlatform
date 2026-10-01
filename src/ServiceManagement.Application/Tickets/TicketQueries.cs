@@ -14,17 +14,27 @@ public sealed record GetTicketByIdQuery(Guid TicketId) : IRequest<TicketDetailDt
 public sealed class GetTicketByIdQueryHandler : IRequestHandler<GetTicketByIdQuery, TicketDetailDto>
 {
     private readonly IApplicationDbContext _dbContext;
+    private readonly ICurrentUserService _currentUser;
 
-    public GetTicketByIdQueryHandler(IApplicationDbContext dbContext)
+    public GetTicketByIdQueryHandler(IApplicationDbContext dbContext, ICurrentUserService currentUser)
     {
         _dbContext = dbContext;
+        _currentUser = currentUser;
     }
 
     public async Task<TicketDetailDto> Handle(GetTicketByIdQuery request, CancellationToken cancellationToken)
     {
+        // Requesters are scoped to their own tickets, and a ticket they do not own
+        // answers 404 rather than 403 so its existence is not revealed.
+        var requesterId = TicketAccessPolicy.CanViewAllTickets(_currentUser.Permissions)
+            ? (Guid?)null
+            : _currentUser.RequireUserId();
+
         var ticket = await _dbContext.Tickets
             .AsNoTracking()
-            .Where(candidate => candidate.Id == request.TicketId && !candidate.IsDeleted)
+            .Where(candidate => candidate.Id == request.TicketId
+                && !candidate.IsDeleted
+                && (requesterId == null || candidate.RequesterId == requesterId))
             .ToDetailDto()
             .FirstOrDefaultAsync(cancellationToken);
 
@@ -58,10 +68,12 @@ public sealed class SearchTicketsQueryHandler
     : IRequestHandler<SearchTicketsQuery, PagedResult<TicketSummaryDto>>
 {
     private readonly IApplicationDbContext _dbContext;
+    private readonly ICurrentUserService _currentUser;
 
-    public SearchTicketsQueryHandler(IApplicationDbContext dbContext)
+    public SearchTicketsQueryHandler(IApplicationDbContext dbContext, ICurrentUserService currentUser)
     {
         _dbContext = dbContext;
+        _currentUser = currentUser;
     }
 
     public async Task<PagedResult<TicketSummaryDto>> Handle(
@@ -89,6 +101,14 @@ public sealed class SearchTicketsQueryHandler
         };
 
         var filtered = specification.Apply(_dbContext.Tickets.AsNoTracking());
+
+        // Scope overrides any client-supplied filter: a caller who cannot see the
+        // whole queue only ever sees the tickets they raised.
+        if (!TicketAccessPolicy.CanViewAllTickets(_currentUser.Permissions))
+        {
+            var scopedRequesterId = _currentUser.RequireUserId();
+            filtered = filtered.Where(ticket => ticket.RequesterId == scopedRequesterId);
+        }
 
         var totalCount = await filtered.CountAsync(cancellationToken);
 
@@ -120,11 +140,17 @@ public sealed class GetTicketHistoryQueryHandler : IRequestHandler<GetTicketHist
         GetTicketHistoryQuery request,
         CancellationToken cancellationToken)
     {
-        var ticketExists = await _dbContext.Tickets
+        // Same visibility rule as detail: scoped callers get 404 for tickets they
+        // did not raise, so a foreign ticket's existence is not revealed.
+        var ticket = await _dbContext.Tickets
             .AsNoTracking()
-            .AnyAsync(ticket => ticket.Id == request.TicketId && !ticket.IsDeleted, cancellationToken);
+            .Where(candidate => candidate.Id == request.TicketId && !candidate.IsDeleted)
+            .Select(candidate => new { candidate.Id, candidate.RequesterId })
+            .FirstOrDefaultAsync(cancellationToken);
 
-        if (!ticketExists)
+        if (ticket is null ||
+            (!TicketAccessPolicy.CanViewAllTickets(_currentUser.Permissions)
+                && ticket.RequesterId != _currentUser.RequireUserId()))
         {
             throw new Common.Exceptions.NotFoundException(nameof(Ticket), request.TicketId);
         }

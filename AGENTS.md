@@ -85,3 +85,4 @@ dotnet run --project src/ServiceManagement.Api
 | SLA deadlines repair runbook | `docs/SLA_BACKFILL.md` |
 | Suppression rationale, known debt | `docs/FINAL_REVIEW.md` |
 | Definition of done | `CONTRIBUTING.md` |
+| Pre-deployment secrets, ops, verification steps | `docs/PRODUCTION_CHECKLIST.md` |

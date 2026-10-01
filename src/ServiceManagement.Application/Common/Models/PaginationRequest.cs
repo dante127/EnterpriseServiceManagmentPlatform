@@ -21,4 +21,12 @@ public class PaginationRequest
     public bool SortDescending { get; set; }
 
     public int Skip => (Math.Max(Page, 1) - 1) * PageSize;
+
+    /// <summary>
+    /// Normalizes loose paging values from a request into a safe pair. Handlers
+    /// must go through this rather than clamping inline, so the page floor and
+    /// the page-size ceiling are defined once.
+    /// </summary>
+    public static (int Page, int PageSize) Normalize(int page, int pageSize)
+        => (Math.Max(page, 1), Math.Clamp(pageSize, 1, MaxPageSize));
 }

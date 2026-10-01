@@ -34,8 +34,7 @@ public sealed class GetNotificationsQueryHandler
         CancellationToken cancellationToken)
     {
         var userId = _currentUser.RequireUserId();
-        var page = Math.Max(request.Page, 1);
-        var pageSize = Math.Clamp(request.PageSize, 1, PaginationRequest.MaxPageSize);
+        var (page, pageSize) = PaginationRequest.Normalize(request.Page, request.PageSize);
 
         var query = _dbContext.Notifications
             .AsNoTracking()
@@ -152,7 +151,11 @@ public sealed class MarkAllNotificationsReadCommandHandler
             .ExecuteUpdateAsync(
                 setters => setters
                     .SetProperty(notification => notification.IsRead, true)
-                    .SetProperty(notification => notification.ReadAt, now),
+                    .SetProperty(notification => notification.ReadAt, now)
+                    // ExecuteUpdate bypasses the save interceptor, so the audit
+                    // columns are stamped here instead.
+                    .SetProperty(notification => notification.UpdatedAt, (DateTimeOffset?)now)
+                    .SetProperty(notification => notification.UpdatedBy, _currentUser.UserId),
                 cancellationToken);
     }
 }

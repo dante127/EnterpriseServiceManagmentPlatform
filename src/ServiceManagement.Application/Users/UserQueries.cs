@@ -64,8 +64,7 @@ public sealed class SearchUsersQueryHandler : IRequestHandler<SearchUsersQuery, 
         SearchUsersQuery request,
         CancellationToken cancellationToken)
     {
-        var page = Math.Max(request.Page, 1);
-        var pageSize = Math.Clamp(request.PageSize, 1, PaginationRequest.MaxPageSize);
+        var (page, pageSize) = PaginationRequest.Normalize(request.Page, request.PageSize);
 
         var query = _dbContext.Users.AsNoTracking();
 

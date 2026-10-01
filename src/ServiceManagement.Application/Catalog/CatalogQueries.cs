@@ -33,27 +33,22 @@ public sealed class GetServicesQueryHandler : IRequestHandler<GetServicesQuery, 
     public Task<IReadOnlyList<ServiceDto>> Handle(
         GetServicesQuery request,
         CancellationToken cancellationToken)
-        => _cache.GetOrCreateAsync(
+        => _cache.GetOrCreateListAsync(
             CacheKeys.Services,
-            async token =>
-            {
-                var services = await _dbContext.Services
-                    .AsNoTracking()
-                    .OrderBy(service => service.Name)
-                    .Select(service => new ServiceDto(
-                        service.Id,
-                        service.Name,
-                        service.Code,
-                        service.Description,
-                        service.CategoryId,
-                        service.Category.Name,
-                        service.DefaultPriorityId,
-                        service.DefaultSlaPolicyId,
-                        service.IsActive))
-                    .ToListAsync(token);
-
-                return (IReadOnlyList<ServiceDto>)services;
-            },
+            token => _dbContext.Services
+                .AsNoTracking()
+                .OrderBy(service => service.Name)
+                .Select(service => new ServiceDto(
+                    service.Id,
+                    service.Name,
+                    service.Code,
+                    service.Description,
+                    service.CategoryId,
+                    service.Category.Name,
+                    service.DefaultPriorityId,
+                    service.DefaultSlaPolicyId,
+                    service.IsActive))
+                .ToListAsync(token),
             TimeSpan.FromMinutes(_redisOptions.DefaultTtlMinutes),
             cancellationToken);
 }
@@ -80,24 +75,19 @@ public sealed class GetServiceCategoriesQueryHandler
     public Task<IReadOnlyList<ServiceCategoryDto>> Handle(
         GetServiceCategoriesQuery request,
         CancellationToken cancellationToken)
-        => _cache.GetOrCreateAsync(
+        => _cache.GetOrCreateListAsync(
             CacheKeys.ServiceCategories,
-            async token =>
-            {
-                var categories = await _dbContext.ServiceCategories
-                    .AsNoTracking()
-                    .OrderBy(category => category.Name)
-                    .Select(category => new ServiceCategoryDto(
-                        category.Id,
-                        category.Name,
-                        category.Code,
-                        category.Description,
-                        category.ParentId,
-                        category.IsActive))
-                    .ToListAsync(token);
-
-                return (IReadOnlyList<ServiceCategoryDto>)categories;
-            },
+            token => _dbContext.ServiceCategories
+                .AsNoTracking()
+                .OrderBy(category => category.Name)
+                .Select(category => new ServiceCategoryDto(
+                    category.Id,
+                    category.Name,
+                    category.Code,
+                    category.Description,
+                    category.ParentId,
+                    category.IsActive))
+                .ToListAsync(token),
             TimeSpan.FromMinutes(_redisOptions.DefaultTtlMinutes),
             cancellationToken);
 }
@@ -124,24 +114,19 @@ public sealed class GetServicePrioritiesQueryHandler
     public Task<IReadOnlyList<ServicePriorityDto>> Handle(
         GetServicePrioritiesQuery request,
         CancellationToken cancellationToken)
-        => _cache.GetOrCreateAsync(
+        => _cache.GetOrCreateListAsync(
             CacheKeys.ServicePriorities,
-            async token =>
-            {
-                var priorities = await _dbContext.ServicePriorities
-                    .AsNoTracking()
-                    .OrderBy(priority => priority.Level)
-                    .Select(priority => new ServicePriorityDto(
-                        priority.Id,
-                        priority.Name,
-                        priority.Code,
-                        priority.Level,
-                        priority.ColorHex,
-                        priority.IsActive))
-                    .ToListAsync(token);
-
-                return (IReadOnlyList<ServicePriorityDto>)priorities;
-            },
+            token => _dbContext.ServicePriorities
+                .AsNoTracking()
+                .OrderBy(priority => priority.Level)
+                .Select(priority => new ServicePriorityDto(
+                    priority.Id,
+                    priority.Name,
+                    priority.Code,
+                    priority.Level,
+                    priority.ColorHex,
+                    priority.IsActive))
+                .ToListAsync(token),
             TimeSpan.FromMinutes(_redisOptions.DefaultTtlMinutes),
             cancellationToken);
 }
@@ -168,26 +153,21 @@ public sealed class GetSlaPoliciesQueryHandler
     public Task<IReadOnlyList<SlaPolicyDto>> Handle(
         GetSlaPoliciesQuery request,
         CancellationToken cancellationToken)
-        => _cache.GetOrCreateAsync(
+        => _cache.GetOrCreateListAsync(
             CacheKeys.SlaPolicies,
-            async token =>
-            {
-                var policies = await _dbContext.SlaPolicies
-                    .AsNoTracking()
-                    .OrderBy(policy => policy.Priority.Level)
-                    .Select(policy => new SlaPolicyDto(
-                        policy.Id,
-                        policy.Name,
-                        policy.PriorityId,
-                        policy.Priority.Name,
-                        policy.FirstResponseMinutes,
-                        policy.ResolutionMinutes,
-                        policy.AtRiskThresholdPercent,
-                        policy.IsActive))
-                    .ToListAsync(token);
-
-                return (IReadOnlyList<SlaPolicyDto>)policies;
-            },
+            token => _dbContext.SlaPolicies
+                .AsNoTracking()
+                .OrderBy(policy => policy.Priority.Level)
+                .Select(policy => new SlaPolicyDto(
+                    policy.Id,
+                    policy.Name,
+                    policy.PriorityId,
+                    policy.Priority.Name,
+                    policy.FirstResponseMinutes,
+                    policy.ResolutionMinutes,
+                    policy.AtRiskThresholdPercent,
+                    policy.IsActive))
+                .ToListAsync(token),
             TimeSpan.FromMinutes(_redisOptions.DefaultTtlMinutes),
             cancellationToken);
 }

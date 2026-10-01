@@ -41,12 +41,28 @@ public static class DatabaseSeeder
             return;
         }
 
-        var permissions = await SeedPermissionsAsync(context, cancellationToken);
-        var roles = await SeedRolesAsync(context, permissions, cancellationToken);
-        var organization = await SeedOrganizationAsync(context, cancellationToken);
-        var catalog = await SeedCatalogAsync(context, cancellationToken);
-        await SeedUsersAsync(context, passwordHasher, roles, organization, cancellationToken);
-        await SeedSampleTicketsAsync(context, catalog, clock, cancellationToken);
+        // One transaction around the whole bootstrap. The steps save separately
+        // (permissions before roles before users), so a failure part-way used to
+        // leave a half-seeded database whose unique index then rejected every
+        // future attempt - permanently wedged until someone cleaned up by hand.
+        // Rolling back together means a retry starts from a clean slate.
+        var strategy = context.Database.CreateExecutionStrategy();
+
+        await strategy.ExecuteAsync(
+            async token =>
+            {
+                await using var transaction = await context.Database.BeginTransactionAsync(token);
+
+                var permissions = await SeedPermissionsAsync(context, token);
+                var roles = await SeedRolesAsync(context, permissions, token);
+                var organization = await SeedOrganizationAsync(context, token);
+                var catalog = await SeedCatalogAsync(context, token);
+                await SeedUsersAsync(context, passwordHasher, roles, organization, clock, token);
+                await SeedSampleTicketsAsync(context, catalog, clock, token);
+
+                await transaction.CommitAsync(token);
+            },
+            cancellationToken);
     }
 
     private static async Task<Dictionary<string, Permission>> SeedPermissionsAsync(
@@ -199,6 +215,7 @@ public static class DatabaseSeeder
         IPasswordHasher passwordHasher,
         IReadOnlyDictionary<string, Role> roles,
         Organization organization,
+        IDateTimeProvider clock,
         CancellationToken cancellationToken)
     {
         var departmentId = await context.Departments
@@ -236,8 +253,8 @@ public static class DatabaseSeeder
         // concurrency error.
         var members = new List<TeamMember>
         {
-            team.AddMember(manager.Id, isManager: true),
-            team.AddMember(agent.Id)
+            team.AddMember(manager.Id, clock.UtcNow, isManager: true),
+            team.AddMember(agent.Id, clock.UtcNow)
         };
 
         context.TeamMembers.AddRange(members);

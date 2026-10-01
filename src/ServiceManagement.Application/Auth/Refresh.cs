@@ -65,24 +65,20 @@ public sealed class RefreshTokenCommandHandler : IRequestHandler<RefreshTokenCom
             throw new UnauthorizedException("The refresh token is not recognised.");
         }
 
-        if (!storedToken.IsActive(now))
+        if (storedToken.IsActive(now))
         {
-            // Replaying a revoked token is treated as a compromise signal: every
-            // active token of that user is invalidated.
-            var activeTokens = await _dbContext.RefreshTokens
-                .Where(token => token.UserId == storedToken.UserId && token.RevokedAt == null)
-                .ToListAsync(cancellationToken);
-
-            foreach (var token in activeTokens)
-            {
-                token.Revoke(now, _currentUser.IpAddress, "ReuseDetected");
-            }
-
-            await _dbContext.SaveChangesAsync(cancellationToken);
-
-            throw new UnauthorizedException("The refresh token is no longer valid. Please sign in again.");
+            return await RotateAsync(storedToken, now, cancellationToken);
         }
 
+        // Replaying a revoked or expired token is treated as a compromise signal:
+        // every active token of that user is invalidated.
+        await RevokeEveryActiveTokenAsync(storedToken.UserId, "ReuseDetected", cancellationToken);
+
+        throw new UnauthorizedException("The refresh token is no longer valid. Please sign in again.");
+    }
+
+    private async Task<AuthTokenDto> RotateAsync(RefreshToken storedToken, DateTimeOffset now, CancellationToken cancellationToken)
+    {
         storedToken.User.EnsureActive();
 
         var securityProfile = await UserSecurityQueryService.LoadAsync(_dbContext, storedToken.UserId, cancellationToken);
@@ -95,7 +91,26 @@ public sealed class RefreshTokenCommandHandler : IRequestHandler<RefreshTokenCom
         var newRefreshTokenHash = _jwtTokenService.HashRefreshToken(newRefreshTokenValue);
         var refreshTokenExpiresAt = now.AddDays(_authOptions.RefreshTokenDays);
 
-        storedToken.Revoke(now, _currentUser.IpAddress, "Rotated", newRefreshTokenHash);
+        // Compare-and-swap revoke: the update only lands if the token is still
+        // unrevoked at write time. Two concurrent refreshes with the same token
+        // would both pass the IsActive check, and without this guard both would
+        // mint a valid replacement - a stolen token would no longer be single-use.
+        // The loser of the race falls into the reuse path below.
+        var revoked = await _dbContext.RefreshTokens
+            .Where(token => token.Id == storedToken.Id && token.RevokedAt == null)
+            .ExecuteUpdateAsync(update => update
+                .SetProperty(token => token.RevokedAt, (DateTimeOffset?)now)
+                .SetProperty(token => token.RevokedByIp, _currentUser.IpAddress)
+                .SetProperty(token => token.ReasonRevoked, "Rotated")
+                .SetProperty(token => token.ReplacedByTokenHash, newRefreshTokenHash),
+                cancellationToken);
+
+        if (revoked == 0)
+        {
+            await RevokeEveryActiveTokenAsync(storedToken.UserId, "ReuseDetected", cancellationToken);
+
+            throw new UnauthorizedException("The refresh token is no longer valid. Please sign in again.");
+        }
 
         _dbContext.RefreshTokens.Add(new RefreshToken(
             storedToken.UserId,
@@ -103,8 +118,6 @@ public sealed class RefreshTokenCommandHandler : IRequestHandler<RefreshTokenCom
             now,
             refreshTokenExpiresAt,
             _currentUser.IpAddress));
-
-        await _dbContext.SaveChangesAsync(cancellationToken);
 
         await _auditService.RecordAsync(
             new AuditEntry(
@@ -115,6 +128,8 @@ public sealed class RefreshTokenCommandHandler : IRequestHandler<RefreshTokenCom
                 _currentUser.IpAddress,
                 _currentUser.CorrelationId),
             cancellationToken);
+
+        await _dbContext.SaveChangesAsync(cancellationToken);
 
         return new AuthTokenDto(
             accessToken.Token,
@@ -128,5 +143,21 @@ public sealed class RefreshTokenCommandHandler : IRequestHandler<RefreshTokenCom
                 storedToken.User.FullName,
                 securityProfile.Roles,
                 securityProfile.Permissions));
+    }
+
+    private async Task RevokeEveryActiveTokenAsync(Guid userId, string reason, CancellationToken cancellationToken)
+    {
+        // Load-then-revoke is safe here: the set only shrinks under concurrency,
+        // and a second pass re-revokes tokens that are already revoked.
+        var activeTokens = await _dbContext.RefreshTokens
+            .Where(token => token.UserId == userId && token.RevokedAt == null)
+            .ToListAsync(cancellationToken);
+
+        foreach (var token in activeTokens)
+        {
+            token.Revoke(_clock.UtcNow, _currentUser.IpAddress, reason);
+        }
+
+        await _dbContext.SaveChangesAsync(cancellationToken);
     }
 }

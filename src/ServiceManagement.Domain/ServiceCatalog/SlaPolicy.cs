@@ -37,7 +37,10 @@ public class SlaPolicy : AuditableEntity
     /// <summary>Minutes allowed before the ticket must be resolved.</summary>
     public int ResolutionMinutes { get; private set; }
 
-    /// <summary>Percentage of the window after which the ticket becomes AtRisk.</summary>
+    /// <summary>
+    /// Percentage of the window still remaining when the ticket becomes AtRisk:
+    /// 20 flags the ticket once 80% of the window has elapsed.
+    /// </summary>
     public int AtRiskThresholdPercent { get; private set; }
 
     public bool IsActive { get; private set; }

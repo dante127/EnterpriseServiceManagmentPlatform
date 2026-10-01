@@ -132,7 +132,9 @@ public sealed class SlaCycle
             // One save, covering the state changes and the notification rows: the
             // notification service stages onto this context rather than flushing,
             // so a failure cannot leave a breach announced but not recorded.
-            await _dbContext.SaveChangesAsync(cancellationToken);
+            // Staging must happen before the save — a save that fails mid-way must
+            // leave both the status change and the notification uncommitted, and
+            // the idempotence check above would otherwise never re-raise them.
             await _notificationService.NotifyManyAsync(notifications, cancellationToken);
             await _dbContext.SaveChangesAsync(cancellationToken);
 
@@ -159,7 +161,7 @@ public sealed class SlaCycle
     {
         yield return ticket.RequesterId;
 
-        if (ticket.AssignedToId is not null)
+        if (ticket.AssignedToId is not null && ticket.AssignedToId.Value != ticket.RequesterId)
         {
             yield return ticket.AssignedToId.Value;
         }

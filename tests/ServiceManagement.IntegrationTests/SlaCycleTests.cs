@@ -79,10 +79,14 @@ public class SlaCycleTests
         var ticketId = await ArrangeAsync("TKT-970003");
 
         // Five minutes in: well inside a 240-minute target, so nothing changes.
+        // Seeded demo tickets may themselves transition on this pass (they exist
+        // in mixed SLA states on purpose), so the assertion is scoped to the
+        // ticket under test; the global no-op property is covered by the
+        // run-twice test below, where the second pass settles everything.
         var cycle = CreateCycle(WithinSla, out _, out _);
-        var result = await cycle.RunAsync(CancellationToken.None);
+        await cycle.RunAsync(CancellationToken.None);
 
-        result.Transitions.Should().Be(0, "the ticket is already WithinSla and well inside its window");
+        (await LoadStatusAsync(ticketId)).Should().Be(SlaStatus.WithinSla);
         (await LoadNotificationCountAsync(ticketId)).Should().Be(0);
     }
 

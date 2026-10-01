@@ -31,7 +31,14 @@ builder.Host.UseSerilog((context, services, loggerConfiguration) => loggerConfig
         retainedFileCountLimit: 14));
 
 builder.Services.AddInfrastructure(builder.Configuration);
-builder.Services.AddApiLayer(builder.Configuration);
+builder.Services.AddApiLayer(builder.Configuration, builder.Environment);
+
+// No endpoint accepts uploads, so a request body above ~1 MB is either a bug or
+// an attack; Kestrel's ~28 MB default is an unbounded DoS surface for a JSON API.
+builder.WebHost.ConfigureKestrel(options =>
+{
+    options.Limits.MaxRequestBodySize = 1024 * 1024;
+});
 
 var app = builder.Build();
 

@@ -27,6 +27,17 @@ public static class WebApplicationExtensions
         // Correlation id first so every later component (and the audit trail) can use it.
         app.UseMiddleware<CorrelationIdMiddleware>();
 
+        // Static hardening headers on every response, including errors and probes:
+        // the API always serves JSON, so MIME-sniffing and framing buy an attacker
+        // nothing and are switched off at the source.
+        app.Use(async (context, next) =>
+        {
+            context.Response.Headers.XContentTypeOptions = "nosniff";
+            context.Response.Headers["X-Frame-Options"] = "DENY";
+            context.Response.Headers["Referrer-Policy"] = "no-referrer";
+            await next(context);
+        });
+
         app.UseExceptionHandler();
 
         app.UseSerilogRequestLogging();

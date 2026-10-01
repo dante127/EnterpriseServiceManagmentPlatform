@@ -31,9 +31,19 @@ public sealed class ApiFactory : WebApplicationFactory<Program>
     /// </summary>
     public bool UseDevelopmentEnvironment { get; set; }
 
+    /// <summary>
+    /// Switches the host to the Production environment, which enables the
+    /// environment-aware secret rules (the development signing key refusal).
+    /// </summary>
+    public bool UseProductionEnvironment { get; set; }
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
-        builder.UseEnvironment(UseDevelopmentEnvironment ? "Development" : "Testing");
+        var environment = UseProductionEnvironment
+            ? "Production"
+            : UseDevelopmentEnvironment ? "Development" : "Testing";
+
+        builder.UseEnvironment(environment);
 
         builder.ConfigureAppConfiguration((_, configuration) =>
         {

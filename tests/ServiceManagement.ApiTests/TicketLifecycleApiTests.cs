@@ -17,8 +17,8 @@ namespace ServiceManagement.ApiTests;
 
 /// <summary>
 /// Full HTTP lifecycle: login, create, assign, progress, resolve, close. Requires
-/// the SQL Server container, so it is skipped unless
-/// <see cref="DatabaseFixture.EnvironmentVariableName"/> is enabled.
+/// SQL Server, so it is skipped unless a database is reachable via
+/// <see cref="DatabaseFixture.ConnectionStringVariableName"/> or a local fallback.
 /// </summary>
 public class TicketLifecycleApiTests : IClassFixture<DatabaseFixture>
 {

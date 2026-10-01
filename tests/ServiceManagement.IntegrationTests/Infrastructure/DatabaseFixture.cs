@@ -47,8 +47,21 @@ public sealed class DatabaseFixture : IAsyncLifetime
 
     public async Task InitializeAsync()
     {
-        if (TryUseConnectionString(Environment.GetEnvironmentVariable(ConnectionStringVariableName)))
+        var requested = Environment.GetEnvironmentVariable(ConnectionStringVariableName);
+
+        if (!string.IsNullOrWhiteSpace(requested))
         {
+            if (!TryUseConnectionString(requested))
+            {
+                // An explicitly requested endpoint that cannot be reached is a CI
+                // configuration failure, not an optional feature. Falling through
+                // to LocalDB would silently skip every test and turn a broken
+                // suite green - the exact failure mode this fixture once had.
+                throw new InvalidOperationException(
+                    $"{ConnectionStringVariableName} is set, but its SQL Server is unreachable "
+                    + $"or could not be migrated: {Redact(requested)}");
+            }
+
             Report("explicit connection string");
             return;
         }
@@ -142,50 +155,56 @@ public sealed class DatabaseFixture : IAsyncLifetime
         return new ApplicationDbContext(options);
     }
 
-    /// <summary>Removes all business data so each test starts from a known state.</summary>
+    /// <summary>
+    /// Removes all data - business, identity and catalog - so each test starts
+    /// from the fully seeded state.
+    /// <para>
+    /// Identity state (users, tokens, roles, org structure) must be cleared along
+    /// with business data: tests mutate passwords, mint refresh tokens and revoke
+    /// roles, and the database persists across runs, so a test that leaks auth
+    /// state breaks whichever test runs next. The seeder rebuilds everything from
+    /// empty, which is what makes the reset deterministic rather than "known, for
+    /// small values of known".
+    /// </para>
+    /// </summary>
     public async Task ResetAsync()
     {
         await using var context = CreateContext();
 
+        // Order matters: each delete names rows the next table references.
         await context.Database.ExecuteSqlRawAsync("DELETE FROM dbo.TicketAssignmentHistory");
         await context.Database.ExecuteSqlRawAsync("DELETE FROM dbo.TicketComments");
         await context.Database.ExecuteSqlRawAsync("DELETE FROM dbo.Tickets");
         await context.Database.ExecuteSqlRawAsync("DELETE FROM dbo.Notifications");
         await context.Database.ExecuteSqlRawAsync("DELETE FROM dbo.AuditLogs");
-
-        // The catalog is reference data, not per-test state, so it is rebuilt only
-        // when missing. Helpers such as TestTicket.CreateAsync resolve a service
-        // and a priority by query and would otherwise fail whenever the suite ran
-        // in an order that had not seeded them yet.
-        await SeedAsync();
-    }
-
-    /// <summary>
-    /// Clears the service catalog as well as the ticket data, then re-seeds it.
-    /// <para>
-    /// <see cref="ResetAsync"/> deliberately leaves the catalog alone so it is not
-    /// rebuilt on every test. That reuse is what makes a test which adds an extra
-    /// policy (a second active one, or a retired one) leak into the next run:
-    /// because the fixture clock is fixed, the leaked row and the freshly seeded
-    /// rows share a <c>CreatedAt</c>, so "newest policy wins" falls through to the
-    /// id tie-break - which is not stable, producing an intermittent failure that
-    /// reads like a product bug. Tests that add catalog rows call this instead.
-    /// </para>
-    /// </summary>
-    public async Task ResetCatalogAsync()
-    {
-        await ResetAsync();
-
-        await using var context = CreateContext();
-
-        // Order matters: Services points at SlaPolicies, so the referencing rows
-        // go first.
+        await context.Database.ExecuteSqlRawAsync("DELETE FROM dbo.RefreshTokens");
+        await context.Database.ExecuteSqlRawAsync("DELETE FROM dbo.UserRoles");
+        await context.Database.ExecuteSqlRawAsync("DELETE FROM dbo.RolePermissions");
+        await context.Database.ExecuteSqlRawAsync("DELETE FROM dbo.TeamMembers");
+        await context.Database.ExecuteSqlRawAsync("DELETE FROM dbo.Teams");
+        await context.Database.ExecuteSqlRawAsync("DELETE FROM dbo.Users");
+        await context.Database.ExecuteSqlRawAsync("DELETE FROM dbo.Roles");
+        await context.Database.ExecuteSqlRawAsync("DELETE FROM dbo.Permissions");
+        await context.Database.ExecuteSqlRawAsync("DELETE FROM dbo.Departments");
+        await context.Database.ExecuteSqlRawAsync("DELETE FROM dbo.Organizations");
         await context.Database.ExecuteSqlRawAsync("DELETE FROM dbo.Services");
         await context.Database.ExecuteSqlRawAsync("DELETE FROM dbo.SlaPolicies");
         await context.Database.ExecuteSqlRawAsync("DELETE FROM dbo.ServicePriorities");
         await context.Database.ExecuteSqlRawAsync("DELETE FROM dbo.ServiceCategories");
 
         await SeedAsync();
+    }
+
+    /// <summary>
+    /// Clears the service catalog as well as everything <see cref="ResetAsync"/>
+    /// clears, then re-seeds it. Tests that add catalog rows call this to make
+    /// their intent explicit; the reset itself now covers the catalog, so the
+    /// leaked-row hazard it used to guard against (a second active policy sharing
+    /// the fixture clock's CreatedAt) no longer exists.
+    /// </summary>
+    public async Task ResetCatalogAsync()
+    {
+        await ResetAsync();
     }
 
     /// <summary>
